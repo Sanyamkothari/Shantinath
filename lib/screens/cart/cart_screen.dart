@@ -226,7 +226,7 @@ class _CartScreenState extends State<CartScreen> {
 
     try {
       final user = authProvider.currentUser!;
-      await orderProvider.placeOrder(
+      final placedOrder = await orderProvider.placeOrder(
         customerId: user.id,
         customerName: user.name,
         customerPhone: user.phone,
@@ -234,6 +234,10 @@ class _CartScreenState extends State<CartScreen> {
         items: cartProvider.items,
         notes: _notesController.text.trim(),
       );
+
+      if (placedOrder == null) {
+        throw Exception(orderProvider.errorMessage ?? (isMarathi ? 'ऑर्डर नोंदवताना त्रुटी आली' : 'Failed to place order'));
+      }
 
       cartProvider.clearCart();
       _notesController.clear();

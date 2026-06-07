@@ -86,7 +86,7 @@ class AuthProvider extends ChangeNotifier {
       }
       _setLoading(false);
       return true;
-    } on Exception catch (e) {
+    } catch (e) {
       _setError(_extractMessage(e));
       _setLoading(false);
       return false;
@@ -135,7 +135,7 @@ class AuthProvider extends ChangeNotifier {
       }
       _setLoading(false);
       return true;
-    } on Exception catch (e) {
+    } catch (e) {
       _setError(_extractMessage(e));
       _setLoading(false);
       return false;
@@ -196,8 +196,8 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Extract a clean error message from an exception.
-  String _extractMessage(Exception e) {
+  /// Extract a clean error message from an exception or error.
+  String _extractMessage(Object e) {
     final raw = e.toString();
     // Remove 'Exception: ' prefix if present
     if (raw.startsWith('Exception: ')) {

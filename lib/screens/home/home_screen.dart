@@ -169,10 +169,11 @@ class _HomeTab extends StatelessWidget {
   }
 
   Future<void> _launchWhatsAppSupport(BuildContext context) async {
-    const phoneNumber = AppConstants.adminPhone;
+    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     const message = "Hello Shantinath Agro Agency, I would like to place an order or make an inquiry.";
     final encodedMessage = Uri.encodeComponent(message);
-    final url = 'https://wa.me/$phoneNumber?text=$encodedMessage';
+    final url = 'https://wa.me/$formattedPhone?text=$encodedMessage';
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -1482,7 +1483,9 @@ class _HomeTab extends StatelessWidget {
               final String schemeName = isCotton ? 'Cotton Seed Booking Scheme' : 'Maize Seed Booking Scheme';
               final String message = 'Hello Shantinath Agro, I am interested in the $schemeName. Please contact me.';
               final encodedMessage = Uri.encodeComponent(message);
-              final url = 'https://wa.me/${AppConstants.adminPhone}?text=$encodedMessage';
+              final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+              final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
+              final url = 'https://wa.me/$formattedPhone?text=$encodedMessage';
               final uri = Uri.parse(url);
               if (await canLaunchUrl(uri)) {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);

@@ -92,7 +92,7 @@ class ProductProvider extends ChangeNotifier {
     try {
       _products = await _productService.getAllProducts();
       _applyFilters();
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
     } finally {
       _isLoading = false;
@@ -157,7 +157,7 @@ class ProductProvider extends ChangeNotifier {
     try {
       await _productService.addProduct(product);
       await loadProducts();
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
@@ -172,7 +172,7 @@ class ProductProvider extends ChangeNotifier {
     try {
       await _productService.updateProduct(product);
       await loadProducts();
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
@@ -190,7 +190,7 @@ class ProductProvider extends ChangeNotifier {
         _errorMessage = 'Product not found';
       }
       await loadProducts();
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();

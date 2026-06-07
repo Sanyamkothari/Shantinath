@@ -21,12 +21,15 @@ class ProductService {
     if (snapshot.docs.isEmpty) {
       needsReSeed = true;
     } else {
-      // Check if any product is using the old schema (lacking companyCity) or old image URLs
+      // Check if any product is using the old schema (lacking companyCity/isFeatured/minOrder/packWeight) or old image URLs
       for (final doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>?;
         final imageUrl = data?['imageUrl'] as String? ?? '';
         if (data == null || 
             !data.containsKey('companyCity') || 
+            !data.containsKey('isFeatured') || 
+            !data.containsKey('minOrder') || 
+            !data.containsKey('packWeight') || 
             imageUrl.startsWith('http') || 
             (imageUrl.isEmpty && doc.id != 'SP005')) {
           needsReSeed = true;

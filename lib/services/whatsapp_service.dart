@@ -13,8 +13,10 @@ class WhatsAppService {
   static Future<void> shareOrderViaWhatsApp(Order order) async {
     final message = _formatOrderMessage(order);
     final encodedMessage = Uri.encodeComponent(message);
+    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     final whatsappUrl =
-        'https://wa.me/${AppConstants.adminPhone}?text=$encodedMessage';
+        'https://wa.me/$formattedPhone?text=$encodedMessage';
 
     final uri = Uri.parse(whatsappUrl);
 
@@ -32,10 +34,11 @@ class WhatsAppService {
     final message = _formatOrderMessage(order);
     final encodedMessage = Uri.encodeComponent(message);
 
-    // Ensure phone number has country code
-    final formattedPhone = phoneNumber.startsWith('91')
-        ? phoneNumber
-        : '91$phoneNumber';
+    // Ensure phone number has country code and is sanitized
+    final cleanPhone = phoneNumber.replaceAll('+', '').replaceAll(' ', '').trim();
+    final formattedPhone = cleanPhone.startsWith('91')
+        ? cleanPhone
+        : '91$cleanPhone';
 
     final whatsappUrl =
         'https://wa.me/$formattedPhone?text=$encodedMessage';

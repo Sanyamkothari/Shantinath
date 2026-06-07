@@ -95,7 +95,8 @@ class _CustomerDirectoryScreenState extends State<CustomerDirectoryScreen> {
   }
 
   Future<void> _messageCustomer(String phone) async {
-    final formattedPhone = phone.startsWith('91') ? phone : '91$phone';
+    final cleanPhone = phone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     final uri = Uri.parse('https://wa.me/$formattedPhone');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);

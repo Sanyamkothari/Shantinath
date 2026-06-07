@@ -80,7 +80,7 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     try {
       final authProvider = context.read<AuthProvider>();
-      await authProvider.register(
+      final success = await authProvider.register(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         village: _villageController.text.trim(),
@@ -98,11 +98,13 @@ class _RegisterScreenState extends State<RegisterScreen>
 
       if (!mounted) return;
 
-      if (authProvider.isLoggedIn) {
+      if (success && authProvider.isLoggedIn) {
         Navigator.of(context).pushNamedAndRemoveUntil(
           AppRoutes.home,
           (route) => false,
         );
+      } else {
+        throw Exception(authProvider.errorMessage ?? 'Registration failed');
       }
     } catch (e) {
       if (!mounted) return;

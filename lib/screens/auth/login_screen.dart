@@ -72,15 +72,17 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final authProvider = context.read<AuthProvider>();
-      await authProvider.login(
+      final success = await authProvider.login(
         _phoneController.text.trim(),
         _isAdminMode ? _passwordController.text.trim() : '',
       );
 
       if (!mounted) return;
 
-      if (authProvider.isLoggedIn) {
+      if (success && authProvider.isLoggedIn) {
         Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+      } else {
+        throw Exception(authProvider.errorMessage ?? 'Login failed');
       }
     } catch (e) {
       if (!mounted) return;

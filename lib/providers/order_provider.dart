@@ -53,7 +53,7 @@ class OrderProvider extends ChangeNotifier {
 
     try {
       _orders = await _orderService.getOrdersByCustomer(customerId);
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
     } finally {
       _isLoading = false;
@@ -69,7 +69,7 @@ class OrderProvider extends ChangeNotifier {
 
     try {
       _orders = await _orderService.getAllOrders();
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
     } finally {
       _isLoading = false;
@@ -122,7 +122,7 @@ class OrderProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return placedOrder;
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
@@ -150,7 +150,7 @@ class OrderProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       return true;
-    } on Exception catch (e) {
+    } catch (e) {
       _errorMessage = e.toString();
       _isLoading = false;
       notifyListeners();
