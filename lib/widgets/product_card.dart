@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shantinath_agro/models/product.dart';
@@ -166,13 +167,14 @@ class ProductCard extends StatelessWidget {
                         if (!inCart)
                           InkWell(
                             onTap: () {
+                              final int addedQty = product.minOrder;
                               cartProvider.addToCart(product, 1);
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
                                     isMarathi 
-                                        ? '${product.nameMr.isNotEmpty ? product.nameMr : product.name} कार्टमध्ये जोडले गेले' 
-                                        : '${product.name} added to cart',
+                                        ? '${product.nameMr.isNotEmpty ? product.nameMr : product.name} ($addedQty नग) कार्टमध्ये जोडले गेले' 
+                                        : '${product.name} ($addedQty units) added to cart',
                                   ),
                                   duration: const Duration(seconds: 1),
                                   action: SnackBarAction(
@@ -241,13 +243,23 @@ class ProductCard extends StatelessWidget {
                                   child: const Icon(Icons.remove, size: 12),
                                 ),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
-                                child: Text(
-                                  '$quantity',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
+                              InkWell(
+                                onTap: () => _showQuantityDialog(context, cartProvider, isMarathi),
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF5F5F0),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '$quantity',
+                                    style: GoogleFonts.outfit(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: const Color(0xFF1B5E20),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -274,6 +286,116 @@ class ProductCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showQuantityDialog(BuildContext context, CartProvider cartProvider, bool isMarathi) {
+    final controller = TextEditingController(text: '${cartProvider.getQuantity(product.id)}');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          isMarathi ? 'किमान ऑर्डर दाखल करा' : 'Enter Custom Quantity',
+          style: GoogleFonts.outfit(
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF1B5E20),
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isMarathi
+                  ? 'या वस्तूसाठी प्रमाण निर्दिष्ट करा:'
+                  : 'Specify the quantity for this cart item:',
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w600),
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                hintText: 'e.g. 100',
+                filled: true,
+                fillColor: const Color(0xFFF5F5F0),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              isMarathi ? 'रद्द करा' : 'Cancel',
+              style: GoogleFonts.outfit(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final val = int.tryParse(controller.text);
+              if (val != null) {
+                if (val < product.minOrder) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        isMarathi
+                            ? 'किमान ऑर्डर ${product.minOrder} नग असणे आवश्यक आहे!'
+                            : 'Minimum order must be at least ${product.minOrder} units!',
+                      ),
+                      backgroundColor: Colors.red.shade700,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                } else if (val % product.minOrder != 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        isMarathi
+                            ? 'प्रमाण हे ${product.minOrder} च्या पटीत असणे आवश्यक आहे!'
+                            : 'Quantity must be a multiple of ${product.minOrder}!',
+                      ),
+                      backgroundColor: Colors.red.shade700,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                } else {
+                  cartProvider.updateQuantity(product.id, val);
+                  Navigator.pop(context);
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              isMarathi ? 'ठीक आहे' : 'OK',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }

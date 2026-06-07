@@ -35,6 +35,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _HomeTab(
         searchController: _searchController,
         searchFocusNode: _searchFocusNode,
+        onViewCart: () {
+          setState(() {
+            _currentIndex = 1;
+          });
+        },
       ),
       const CartScreen(isTab: true),
       const OrderHistoryScreen(isTab: true),
@@ -132,10 +137,12 @@ class _HomeScreenState extends State<HomeScreen> {
 class _HomeTab extends StatelessWidget {
   final TextEditingController searchController;
   final FocusNode searchFocusNode;
+  final VoidCallback onViewCart;
 
   const _HomeTab({
     required this.searchController,
     required this.searchFocusNode,
+    required this.onViewCart,
   });
 
   String? _getBrandLogo(String brand) {
@@ -196,6 +203,7 @@ class _HomeTab extends StatelessWidget {
               : _buildDashboard(context, provider, isMarathi),
         ),
       ),
+      bottomNavigationBar: _buildStickyCartSummary(context),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _launchWhatsAppSupport(context),
         backgroundColor: const Color(0xFF25D366),
@@ -206,6 +214,116 @@ class _HomeTab extends StatelessWidget {
         child: const Icon(
           Icons.chat_bubble_rounded,
           color: Colors.white,
+        ),
+      ),
+    );
+  }
+
+  Widget? _buildStickyCartSummary(BuildContext context) {
+    final cartProvider = context.watch<CartProvider>();
+    if (cartProvider.isEmpty) return null;
+
+    final isMarathi = context.watch<LocaleProvider>().isMarathi;
+    final totalCount = cartProvider.itemCount;
+    final totalPrice = cartProvider.totalAmount;
+
+    double totalWeight = 0.0;
+    for (final item in cartProvider.items) {
+      totalWeight += item.quantity * item.product.packWeight;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF8F00).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          isMarathi ? '$totalCount वस्तू' : '$totalCount Items',
+                          style: GoogleFonts.outfit(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFFE65100),
+                          ),
+                        ),
+                      ),
+                      if (totalWeight > 0) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          isMarathi 
+                              ? 'वजन: ${totalWeight.toStringAsFixed(1)} किलो' 
+                              : 'Weight: ${totalWeight.toStringAsFixed(1)} kg',
+                          style: GoogleFonts.outfit(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '₹${totalPrice.toStringAsFixed(0)}',
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF2E7D32),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: onViewCart,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    isMarathi ? 'कार्ट पहा' : 'View Cart',
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.arrow_forward_rounded, size: 16),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -222,6 +340,8 @@ class _HomeTab extends StatelessWidget {
         SliverToBoxAdapter(child: _buildWelcomeHeader(context, isMarathi)),
         // Schemes Carousel
         SliverToBoxAdapter(child: _buildSchemesCarousel(context, isMarathi)),
+        // Daily Notice Board
+        SliverToBoxAdapter(child: _buildNoticeBoard(context, isMarathi)),
         // Shop by Category quick navigation
         SliverToBoxAdapter(child: _buildCategoriesGrid(context, provider, isMarathi)),
         // Shop by Brand horizontal scroll
@@ -284,6 +404,55 @@ class _HomeTab extends StatelessWidget {
           ),
         const SliverToBoxAdapter(child: SizedBox(height: 90)),
       ],
+    );
+  }
+
+  Widget _buildNoticeBoard(BuildContext context, bool isMarathi) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2E7D32).withOpacity(0.15)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.campaign_rounded, color: Color(0xFF2E7D32), size: 20),
+              const SizedBox(width: 8),
+              Text(
+                isMarathi ? 'आजची महत्त्वाची सूचना' : 'Daily Notices',
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF1B5E20),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isMarathi
+                ? '• सोयाबीन बियाणे (JS-9305) चा नवीन साठा उद्या उपलब्ध होणार आहे. मर्यादित साठा असल्यामुळे पूर्व-बुकिंग करून ठेवा.\n• २० जूनपूर्वी पेमेंट भरणाऱ्या सर्व ऑर्डर्सना ५० ते ७५ रुपये प्रति बॅग अतिरिक्त सवलत मिळेल.'
+                : '• New stock of Soybean seeds (JS-9305) arriving tomorrow. Limited quantities, please pre-book early.\n• All bookings completed with payment realization before June 20 eligible for early discount schemes.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade800,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -908,49 +1077,68 @@ class _HomeTab extends StatelessWidget {
             ),
           ),
         ),
-        // Search bar
+        // Search bar & Filter Button
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: TextField(
-              controller: searchController,
-              focusNode: searchFocusNode,
-              onChanged: (value) {
-                provider.searchProducts(value);
-              },
-              decoration: InputDecoration(
-                hintText: isMarathi ? 'बियाणे, खते शोधा...' : 'Search seeds, fertilizers...',
-                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF2E7D32)),
-                suffixIcon: provider.searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.close_rounded, color: Colors.grey.shade500),
-                        onPressed: () {
-                          searchController.clear();
-                          provider.searchProducts('');
-                          searchFocusNode.unfocus();
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: searchController,
+                    focusNode: searchFocusNode,
+                    onChanged: (value) {
+                      provider.searchProducts(value);
+                    },
+                    decoration: InputDecoration(
+                      hintText: isMarathi ? 'बियाणे, खते शोधा...' : 'Search seeds, fertilizers...',
+                      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                      prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF2E7D32)),
+                      suffixIcon: provider.searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.close_rounded, color: Colors.grey.shade500),
+                              onPressed: () {
+                                searchController.clear();
+                                provider.searchProducts('');
+                                searchFocusNode.unfocus();
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: () => _showFilterBottomSheet(context, provider, isMarathi),
+                  icon: const Icon(Icons.filter_alt_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32).withOpacity(0.08),
+                    foregroundColor: const Color(0xFF2E7D32),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
+              ],
             ),
           ),
         ),
@@ -1170,6 +1358,33 @@ class _HomeTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF8F00).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFF8F00).withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.timer_outlined, color: Color(0xFFE65100), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isMarathi
+                            ? 'मुदत सूचना: २० जूनपूर्वी पेमेंट केल्यास जास्तीत जास्त सवलत मिळेल (फक्त १२ दिवस शिल्लक!)'
+                            : 'Milestone: Payments before June 20 get maximum discount (closes in 12 days!)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFE65100),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               if (isCotton) ...[
                 _buildSchemeRow(
                   label: isMarathi ? 'सामान्य सवलत:' : 'Normal Discount:',
@@ -1262,6 +1477,28 @@ class _HomeTab extends StatelessWidget {
           ),
         ),
         actions: [
+          ElevatedButton.icon(
+            onPressed: () async {
+              final String schemeName = isCotton ? 'Cotton Seed Booking Scheme' : 'Maize Seed Booking Scheme';
+              final String message = 'Hello Shantinath Agro, I am interested in the $schemeName. Please contact me.';
+              final encodedMessage = Uri.encodeComponent(message);
+              final url = 'https://wa.me/${AppConstants.adminPhone}?text=$encodedMessage';
+              final uri = Uri.parse(url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+            icon: const Icon(Icons.chat_outlined, size: 16),
+            label: Text(isMarathi ? 'व्हॉट्सॲप चौकशी' : 'Inquire on WhatsApp'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text(
@@ -1303,6 +1540,214 @@ class _HomeTab extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showFilterBottomSheet(BuildContext context, ProductProvider provider, bool isMarathi) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Consumer<ProductProvider>(
+          builder: (context, localProvider, _) {
+            return Container(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isMarathi ? 'फिल्टर निवडा' : 'Refine Products',
+                        style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF1B5E20),
+                        ),
+                      ),
+                      if (localProvider.selectedCategory != null ||
+                          localProvider.selectedBrand != null ||
+                          localProvider.selectedCropType != null)
+                        TextButton(
+                          onPressed: () {
+                            localProvider.clearFilters();
+                          },
+                          child: Text(
+                            isMarathi ? 'सर्व साफ करा' : 'Clear All',
+                            style: GoogleFonts.outfit(
+                              color: Colors.red.shade700,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const Divider(height: 20),
+
+                  // Category Filter
+                  Text(
+                    isMarathi ? 'वर्गवारी' : 'Category',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _buildFilterChip(
+                        label: isMarathi ? 'बियाणे' : 'Seeds',
+                        isSelected: localProvider.selectedCategory == 'Seeds',
+                        onTap: () {
+                          localProvider.filterByCategory(
+                            localProvider.selectedCategory == 'Seeds' ? null : 'Seeds'
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _buildFilterChip(
+                        label: isMarathi ? 'खते' : 'Fertilizers',
+                        isSelected: localProvider.selectedCategory == 'Fertilizers',
+                        onTap: () {
+                          localProvider.filterByCategory(
+                            localProvider.selectedCategory == 'Fertilizers' ? null : 'Fertilizers'
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Brand Filter
+                  Text(
+                    isMarathi ? 'कंपनी / ब्रँड' : 'Company / Brand',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 38,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: AppConstants.brands.length,
+                      itemBuilder: (context, index) {
+                        final brand = AppConstants.brands[index];
+                        final isSelected = localProvider.selectedBrand == brand;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _buildFilterChip(
+                            label: brand,
+                            isSelected: isSelected,
+                            onTap: () {
+                              localProvider.filterByBrand(isSelected ? null : brand);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Crop Filter
+                  Text(
+                    isMarathi ? 'पिकानुसार' : 'Crop Type',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 38,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: localProvider.cropTypes.length,
+                      itemBuilder: (context, index) {
+                        final crop = localProvider.cropTypes[index];
+                        final isSelected = localProvider.selectedCropType == crop;
+                        final label = isMarathi ? (AppConstants.cropTypesMr[crop] ?? crop) : crop;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _buildFilterChip(
+                            label: label,
+                            isSelected: isSelected,
+                            onTap: () {
+                              localProvider.filterByCropType(isSelected ? null : crop);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2E7D32),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        isMarathi ? 'लागू करा' : 'Apply Filters',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade100,
+          border: Border.all(
+            color: isSelected ? const Color(0xFF2E7D32) : Colors.grey.shade300,
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.outfit(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : Colors.grey.shade800,
+          ),
+        ),
       ),
     );
   }
