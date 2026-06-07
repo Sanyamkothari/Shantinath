@@ -25,6 +25,10 @@ class ProductProvider extends ChangeNotifier {
   /// All loaded products (unfiltered).
   List<Product> get products => List.unmodifiable(_products);
 
+  /// Products marked as featured.
+  List<Product> get featuredProducts =>
+      _products.where((p) => p.isFeatured).toList();
+
   /// Products after applying active filters and search query.
   List<Product> get filteredProducts => List.unmodifiable(_filteredProducts);
 

@@ -16,6 +16,7 @@ class Product {
   final String companyCity;
   final int minOrder;
   final double packWeight;
+  final bool isFeatured;
 
   const Product({
     required this.id,
@@ -34,6 +35,7 @@ class Product {
     this.companyCity = '',
     this.minOrder = 1,
     this.packWeight = 0.0,
+    this.isFeatured = false,
   });
 
   /// Creates a [Product] from a JSON map.
@@ -55,6 +57,7 @@ class Product {
       companyCity: (json['companyCity'] ?? '') as String,
       minOrder: (json['minOrder'] ?? 1) as int,
       packWeight: (json['packWeight'] as num? ?? 0.0).toDouble(),
+      isFeatured: json['isFeatured'] as bool? ?? false,
     );
   }
 
@@ -77,6 +80,7 @@ class Product {
       'companyCity': companyCity,
       'minOrder': minOrder,
       'packWeight': packWeight,
+      'isFeatured': isFeatured,
     };
   }
 
@@ -98,6 +102,7 @@ class Product {
     String? companyCity,
     int? minOrder,
     double? packWeight,
+    bool? isFeatured,
   }) {
     return Product(
       id: id ?? this.id,
@@ -116,6 +121,7 @@ class Product {
       companyCity: companyCity ?? this.companyCity,
       minOrder: minOrder ?? this.minOrder,
       packWeight: packWeight ?? this.packWeight,
+      isFeatured: isFeatured ?? this.isFeatured,
     );
   }
 
@@ -150,6 +156,7 @@ class Product {
         companyCity: 'शेलू',
         minOrder: 20,
         packWeight: 0.475,
+        isFeatured: true,
       ),
       Product(
         id: 'SP002',
@@ -294,6 +301,7 @@ class Product {
         companyCity: 'शेलू',
         minOrder: 1,
         packWeight: 30.0,
+        isFeatured: true,
       ),
       Product(
         id: 'SP010',
@@ -348,6 +356,7 @@ class Product {
         companyCity: 'दिल्ली',
         minOrder: 30,
         packWeight: 0.475,
+        isFeatured: true,
       ),
       Product(
         id: 'SP013',
@@ -582,6 +591,7 @@ class Product {
         companyCity: 'हैद्राबाद',
         minOrder: 30,
         packWeight: 0.475,
+        isFeatured: true,
       ),
       Product(
         id: 'SP026',
@@ -672,6 +682,7 @@ class Product {
         companyCity: 'संभाजीनगर',
         minOrder: 1,
         packWeight: 30.0,
+        isFeatured: true,
       ),
       Product(
         id: 'SP031',
@@ -726,6 +737,7 @@ class Product {
         companyCity: 'बुलढाणा',
         minOrder: 1,
         packWeight: 30.0,
+        isFeatured: true,
       ),
     ];
   }
