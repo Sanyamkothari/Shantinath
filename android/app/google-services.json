@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "861234828164",
+    "project_id": "shantinath-agro",
+    "storage_bucket": "shantinath-agro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:861234828164:android:2675f5db8a15b460e603d1",
+        "android_client_info": {
+          "package_name": "com.shantinathagroagency.shantinath_agro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD0JPGvBp5Ua7nuucu-CAD2htm5lucxIwY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
