@@ -711,34 +711,37 @@ class _HomeTab extends StatelessWidget {
   Widget _buildCategoriesGrid(BuildContext context, ProductProvider provider, bool isMarathi) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildCategoryCard(
-              context,
-              title: isMarathi ? 'बियाणे' : 'Seeds',
-              subtitle: isMarathi ? 'दर्जेदार बियाणे' : 'High quality seeds',
-              icon: Icons.spa_rounded,
-              color: const Color(0xFF1B5E20),
-              onTap: () {
-                provider.filterByCategory('Seeds');
-              },
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: _buildCategoryCard(
+                context,
+                title: isMarathi ? 'बियाणे' : 'Seeds',
+                subtitle: isMarathi ? 'दर्जेदार बियाणे' : 'High quality seeds',
+                icon: Icons.spa_rounded,
+                color: const Color(0xFF1B5E20),
+                onTap: () {
+                  provider.filterByCategory('Seeds');
+                },
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: _buildCategoryCard(
-              context,
-              title: isMarathi ? 'खते' : 'Fertilizers',
-              subtitle: isMarathi ? 'उत्कृष्ट खते' : 'Best soil nutrition',
-              icon: Icons.grass_rounded,
-              color: const Color(0xFFE65100),
-              onTap: () {
-                provider.filterByCategory('Fertilizers');
-              },
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildCategoryCard(
+                context,
+                title: isMarathi ? 'खते' : 'Fertilizers',
+                subtitle: isMarathi ? 'उत्कृष्ट खते' : 'Best soil nutrition',
+                icon: Icons.grass_rounded,
+                color: const Color(0xFFE65100),
+                onTap: () {
+                  provider.filterByCategory('Fertilizers');
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -752,7 +755,7 @@ class _HomeTab extends StatelessWidget {
     required VoidCallback onTap,
   }) {
     return Container(
-      height: 90,
+      constraints: const BoxConstraints(minHeight: 90),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),

@@ -152,11 +152,10 @@ class ProfileScreen extends StatelessWidget {
               ],
 
               // Options Menu
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
+              Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     // Language Selection Tile
