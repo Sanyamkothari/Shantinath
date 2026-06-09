@@ -479,15 +479,18 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              Text(
-                'Shantinath Agro',
-                style: GoogleFonts.outfit(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+              Expanded(
+                child: Text(
+                  'Shantinath Agro',
+                  style: GoogleFonts.outfit(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 10),
               const LanguageToggle(),
               const SizedBox(width: 4),
               const CartBadge(),
@@ -612,7 +615,7 @@ class _HomeTab extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 120,
+          height: 130,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -636,7 +639,7 @@ class _HomeTab extends StatelessWidget {
                     ),
                     borderRadius: BorderRadius.circular(16),
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       child: Row(
                         children: [
                           Expanded(
@@ -681,6 +684,8 @@ class _HomeTab extends StatelessWidget {
                                     color: Colors.grey.shade700,
                                     fontWeight: FontWeight.w500,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
