@@ -500,6 +500,7 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildEmptyCart() {
+    final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
     return SafeArea(
       child: Center(
         child: Column(
@@ -737,6 +738,7 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildNotesField() {
+    final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -790,6 +792,7 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Widget _buildBottomBar(CartProvider cartProvider) {
+    final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       decoration: BoxDecoration(
