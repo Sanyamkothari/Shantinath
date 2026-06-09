@@ -357,14 +357,17 @@ class _HomeTab extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    isMarathi ? 'वैशिष्ट्यपूर्ण उत्पादने (फक्त बुकिंग)' : 'Featured Products (Booking)',
-                    style: GoogleFonts.outfit(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF263238),
+                  Expanded(
+                    child: Text(
+                      isMarathi ? 'वैशिष्ट्यपूर्ण उत्पादने (फक्त बुकिंग)' : 'Featured Products (Booking)',
+                      style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF263238),
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
