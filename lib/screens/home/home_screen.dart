@@ -618,7 +618,7 @@ class _HomeTab extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 130,
+          height: 145,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -843,7 +843,7 @@ class _HomeTab extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 90,
+          height: 100,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -951,7 +951,7 @@ class _HomeTab extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 95,
+          height: 105,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
