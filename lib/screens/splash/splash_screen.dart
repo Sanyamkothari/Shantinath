@@ -176,7 +176,7 @@ class _SplashScreenState extends State<SplashScreen>
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
+                            color: Colors.black.withValues(alpha: 0.2),
                             blurRadius: 30,
                             spreadRadius: 5,
                           ),
@@ -212,7 +212,7 @@ class _SplashScreenState extends State<SplashScreen>
                             style: GoogleFonts.outfit(
                               fontSize: 28,
                               fontWeight: FontWeight.w400,
-                              color: Colors.white.withOpacity(0.9),
+                              color: Colors.white.withValues(alpha: 0.9),
                               letterSpacing: 3.0,
                             ),
                           ),
@@ -234,17 +234,17 @@ class _SplashScreenState extends State<SplashScreen>
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(30),
                           border: Border.all(
-                            color: Colors.white.withOpacity(0.4),
+                            color: Colors.white.withValues(alpha: 0.4),
                             width: 1,
                           ),
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                         ),
                         child: Text(
                           'Quality Seeds & Fertilizers',
                           style: GoogleFonts.outfit(
                             fontSize: 16,
                             fontWeight: FontWeight.w300,
-                            color: Colors.white.withOpacity(0.95),
+                            color: Colors.white.withValues(alpha: 0.95),
                             letterSpacing: 1.2,
                           ),
                         ),
@@ -287,7 +287,7 @@ class _SplashScreenState extends State<SplashScreen>
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: Colors.white.withOpacity(opacity),
+        color: Colors.white.withValues(alpha: opacity),
       ),
     );
   }

@@ -177,7 +177,7 @@ class _CartScreenState extends State<CartScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withOpacity(0.06),
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -332,7 +332,7 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Future<void> _showClearCartDialog(BuildContext context) async {
+  Future<void> _showClearCartDialog() async {
     final isMarathi = Provider.of<LocaleProvider>(context, listen: false).isMarathi;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -380,20 +380,20 @@ class _CartScreenState extends State<CartScreen> {
       ),
     );
 
-    if (confirmed == true && mounted) {
-      context.read<CartProvider>().clearCart();
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isMarathi ? 'कार्ट रिकामे केले गेले' : 'Cart cleared',
-          ),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          duration: const Duration(seconds: 2),
+    if (confirmed != true || !mounted) return;
+
+    context.read<CartProvider>().clearCart();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          isMarathi ? 'कार्ट रिकामे केले गेले' : 'Cart cleared',
         ),
-      );
-    }
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -416,7 +416,7 @@ class _CartScreenState extends State<CartScreen> {
                 if (cartProvider.items.isNotEmpty)
                   IconButton(
                     icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
-                    onPressed: () => _showClearCartDialog(context),
+                    onPressed: () => _showClearCartDialog(),
                     tooltip: isMarathi ? 'कार्ट रिकामे करा' : 'Clear Cart',
                   ),
               ],
@@ -470,7 +470,7 @@ class _CartScreenState extends State<CartScreen> {
             const Spacer(),
             if (cartProvider.items.isNotEmpty)
               TextButton.icon(
-                onPressed: () => _showClearCartDialog(context),
+                onPressed: () => _showClearCartDialog(),
                 icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.redAccent),
                 label: Text(
                   isMarathi ? 'रिकामे करा' : 'Clear',
@@ -485,7 +485,7 @@ class _CartScreenState extends State<CartScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7D32).withOpacity(0.08),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -514,7 +514,7 @@ class _CartScreenState extends State<CartScreen> {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withOpacity(0.06),
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -594,7 +594,7 @@ class _CartScreenState extends State<CartScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -750,7 +750,7 @@ class _CartScreenState extends State<CartScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -803,7 +803,7 @@ class _CartScreenState extends State<CartScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -867,7 +867,7 @@ class _CartScreenState extends State<CartScreen> {
                         },
                         icon: const Icon(Icons.share_rounded, size: 22),
                         style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                          backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.12),
                           foregroundColor: const Color(0xFF25D366),
                         ),
                       ),
@@ -889,7 +889,7 @@ class _CartScreenState extends State<CartScreen> {
                           backgroundColor: const Color(0xFF2E7D32),
                           foregroundColor: Colors.white,
                           elevation: 2,
-                          shadowColor: const Color(0xFF2E7D32).withOpacity(0.3),
+                          shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.3),
                           padding: const EdgeInsets.symmetric(horizontal: 24),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),

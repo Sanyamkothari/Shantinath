@@ -401,7 +401,7 @@ class _ProductListTile extends StatelessWidget {
                         child: Switch(
                           value: product.inStock,
                           onChanged: (_) => onToggleStock(),
-                          activeColor: const Color(0xFF2E7D32),
+                          activeThumbColor: const Color(0xFF2E7D32),
                           activeTrackColor:
                               const Color(0xFF2E7D32).withValues(alpha: 0.3),
                         ),

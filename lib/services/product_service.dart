@@ -13,40 +13,12 @@ class ProductService {
   ProductService._internal();
 
   /// Returns all products from Firestore.
-  /// Automatically seeds the Firestore database if it is empty.
+  /// Seeds the Firestore database if it is empty.
   Future<List<Product>> getAllProducts() async {
     final snapshot = await _productsRef.get();
-    bool needsReSeed = false;
     
     if (snapshot.docs.isEmpty) {
-      needsReSeed = true;
-    } else {
-      // Check if any product is using the old schema (lacking companyCity/isFeatured/minOrder/packWeight) or old image URLs
-      for (final doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>?;
-        final imageUrl = data?['imageUrl'] as String? ?? '';
-        if (data == null || 
-            !data.containsKey('companyCity') || 
-            !data.containsKey('isFeatured') || 
-            !data.containsKey('minOrder') || 
-            !data.containsKey('packWeight') || 
-            imageUrl.startsWith('http') || 
-            (imageUrl.isEmpty && doc.id != 'SP005')) {
-          needsReSeed = true;
-          break;
-        }
-      }
-    }
-    
-    if (needsReSeed) {
-      // Wipe existing products to prevent schema discrepancies
-      final batch = _db.batch();
-      for (final doc in snapshot.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-
-      // Seed database with sample products
+      // Seed database with sample products if completely empty
       final samples = Product.getSampleProducts();
       final seedBatch = _db.batch();
       
@@ -56,10 +28,14 @@ class ProductService {
       }
       
       await seedBatch.commit();
+      
+      final currentSnapshot = await _productsRef.orderBy('createdAt', descending: true).get();
+      return currentSnapshot.docs
+          .map((doc) => Product.fromJson(doc.data() as Map<String, dynamic>))
+          .toList();
     }
-
-    final currentSnapshot = await _productsRef.orderBy('createdAt', descending: true).get();
-    return currentSnapshot.docs
+    
+    return snapshot.docs
         .map((doc) => Product.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
   }

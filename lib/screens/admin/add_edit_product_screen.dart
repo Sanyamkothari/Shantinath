@@ -289,7 +289,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
               // Brand dropdown
               DropdownButtonFormField<String>(
-                value: _selectedBrand,
+                initialValue: _selectedBrand,
                 decoration: _inputDecoration('Brand', Icons.business_rounded),
                 items: AppConstants.brands
                     .map((b) => DropdownMenuItem(value: b, child: Text(b)))
@@ -303,7 +303,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
               // Category dropdown
               DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                initialValue: _selectedCategory,
                 decoration: _inputDecoration('Category', Icons.category_rounded),
                 items: AppConstants.categories
                     .map((c) => DropdownMenuItem(value: c, child: Text(c)))
@@ -317,7 +317,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
               // Crop Type dropdown
               DropdownButtonFormField<String>(
-                value: _selectedCropType,
+                initialValue: _selectedCropType,
                 decoration: _inputDecoration('Crop Type', Icons.eco_rounded),
                 items: AppConstants.cropTypes
                     .map((c) => DropdownMenuItem(value: c, child: Text(c)))
@@ -439,7 +439,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                     Switch(
                       value: _inStock,
                       onChanged: (v) => setState(() => _inStock = v),
-                      activeColor: const Color(0xFF2E7D32),
+                      activeThumbColor: const Color(0xFF2E7D32),
                       activeTrackColor:
                           const Color(0xFF2E7D32).withValues(alpha: 0.3),
                     ),

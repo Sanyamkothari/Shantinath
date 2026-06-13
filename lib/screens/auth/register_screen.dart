@@ -121,9 +121,19 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
+  bool _phonePreFilled = false;
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+
+    if (!_phonePreFilled) {
+      final verifiedPhone = ModalRoute.of(context)?.settings.arguments as String?;
+      if (verifiedPhone != null && verifiedPhone.isNotEmpty) {
+        _phoneController.text = verifiedPhone;
+        _phonePreFilled = true;
+      }
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
@@ -219,7 +229,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
+                          color: Colors.black.withValues(alpha: 0.15),
                           blurRadius: 16,
                           spreadRadius: 2,
                         ),
@@ -303,12 +313,13 @@ class _RegisterScreenState extends State<RegisterScreen>
                 },
               ),
               const SizedBox(height: 16),
-              _buildTextField(
+               _buildTextField(
                 controller: _phoneController,
                 label: 'Phone Number',
                 hint: 'Enter 10-digit phone number',
                 icon: Icons.phone_rounded,
                 keyboardType: TextInputType.phone,
+                enabled: !_phonePreFilled,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(10),
@@ -460,7 +471,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.02),
+                color: Colors.black.withValues(alpha: 0.02),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -569,6 +580,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     List<TextInputFormatter>? inputFormatters,
     TextCapitalization textCapitalization = TextCapitalization.none,
     String? Function(String?)? validator,
+    bool enabled = true,
   }) {
     return TextFormField(
       controller: controller,
@@ -576,13 +588,14 @@ class _RegisterScreenState extends State<RegisterScreen>
       inputFormatters: inputFormatters,
       textCapitalization: textCapitalization,
       validator: validator,
+      enabled: enabled,
       style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon, color: const Color(0xFF2E7D32), size: 22),
         filled: true,
-        fillColor: const Color(0xFFF5F5F0),
+        fillColor: enabled ? const Color(0xFFF5F5F0) : Colors.grey.shade200,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
@@ -590,6 +603,10 @@ class _RegisterScreenState extends State<RegisterScreen>
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(color: Colors.grey.shade200, width: 1.5),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -620,9 +637,9 @@ class _RegisterScreenState extends State<RegisterScreen>
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF2E7D32),
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF2E7D32).withOpacity(0.6),
+          disabledBackgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.6),
           elevation: 4,
-          shadowColor: const Color(0xFF2E7D32).withOpacity(0.4),
+          shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),

@@ -67,12 +67,12 @@ class ProductImage extends StatelessWidget {
         gradient: LinearGradient(
           colors: isSeeds
               ? [
-                  const Color(0xFF2E7D32).withOpacity(0.08),
-                  const Color(0xFF4CAF50).withOpacity(0.02)
+                  const Color(0xFF2E7D32).withValues(alpha: 0.08),
+                  const Color(0xFF4CAF50).withValues(alpha: 0.02)
                 ]
               : [
-                  const Color(0xFFFF8F00).withOpacity(0.08),
-                  const Color(0xFFFFB300).withOpacity(0.02)
+                  const Color(0xFFFF8F00).withValues(alpha: 0.08),
+                  const Color(0xFFFFB300).withValues(alpha: 0.02)
                 ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

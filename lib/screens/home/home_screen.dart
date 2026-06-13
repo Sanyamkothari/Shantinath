@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shantinath_agro/config/constants.dart';
+import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/product_provider.dart';
 import 'package:shantinath_agro/providers/cart_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
@@ -70,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -86,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: const Color(0xFF2E7D32).withOpacity(0.12),
+        indicatorColor: const Color(0xFF2E7D32).withValues(alpha: 0.12),
         height: 70,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: [
@@ -178,6 +179,7 @@ class _HomeTab extends StatelessWidget {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not launch WhatsApp. Please install it.')),
       );
@@ -238,7 +240,7 @@ class _HomeTab extends StatelessWidget {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -260,7 +262,7 @@ class _HomeTab extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFF8F00).withOpacity(0.1),
+                          color: const Color(0xFFFF8F00).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -331,7 +333,7 @@ class _HomeTab extends StatelessWidget {
   }
 
   Widget _buildDashboard(BuildContext context, ProductProvider provider, bool isMarathi) {
-    final featuredList = provider.featuredProducts;
+    final brands = AppConstants.brands;
 
     return CustomScrollView(
       slivers: [
@@ -339,121 +341,103 @@ class _HomeTab extends StatelessWidget {
         _buildDashboardAppBar(context),
         // Welcome Header & Integrated Search Bar
         SliverToBoxAdapter(child: _buildWelcomeHeader(context, isMarathi)),
-        // Schemes Carousel
-        SliverToBoxAdapter(child: _buildSchemesCarousel(context, isMarathi)),
-        // Daily Notice Board
-        SliverToBoxAdapter(child: _buildNoticeBoard(context, isMarathi)),
-        // Shop by Category quick navigation
-        SliverToBoxAdapter(child: _buildCategoriesGrid(context, provider, isMarathi)),
-        // Shop by Brand horizontal scroll
-        SliverToBoxAdapter(child: _buildBrandsSection(context, provider, isMarathi)),
-        // Shop by Crop circular badges
-        SliverToBoxAdapter(child: _buildCropsSection(context, provider, isMarathi)),
-        // Featured Products header
-        if (featuredList.isNotEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    isMarathi ? 'वैशिष्ट्यपूर्ण उत्पादने (फक्त बुकिंग)' : 'Featured Products (Booking)',
-                    style: GoogleFonts.outfit(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF263238),
-                    ),
+        
+        // Select Company Title
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+            child: Text(
+              isMarathi ? 'खरेदीसाठी कंपनी निवडा' : 'Select Company to Shop',
+              style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFF263238),
+              ),
+            ),
+          ),
+        ),
+
+        // Company Logos Grid
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 16,
+              crossAxisSpacing: 16,
+              childAspectRatio: 0.85,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final brand = brands[index];
+                final logo = _getBrandLogo(brand);
+
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFF8F00).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      isMarathi ? 'विशेष योजना' : 'Special Schemes',
-                      style: GoogleFonts.outfit(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFFE65100),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.pushNamed(
+                          context,
+                          AppRoutes.companyProducts,
+                          arguments: brand,
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Center(
+                                child: logo != null
+                                    ? Image.asset(
+                                        logo,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return _buildBrandInitialsBadge(brand);
+                                        },
+                                      )
+                                    : _buildBrandInitialsBadge(brand),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              brand,
+                              style: GoogleFonts.outfit(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade800,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                );
+              },
+              childCount: brands.length,
             ),
           ),
-        // Featured Products Grid
-        if (featuredList.isNotEmpty)
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.62,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return ProductCard(product: featuredList[index]);
-                },
-                childCount: featuredList.length,
-              ),
-            ),
-          ),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 90)),
       ],
-    );
-  }
-
-  Widget _buildNoticeBoard(BuildContext context, bool isMarathi) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2E7D32).withOpacity(0.15)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.campaign_rounded, color: Color(0xFF2E7D32), size: 20),
-              const SizedBox(width: 8),
-              Text(
-                isMarathi ? 'आजची महत्त्वाची सूचना' : 'Daily Notices',
-                style: GoogleFonts.outfit(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF1B5E20),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            isMarathi
-                ? '• सोयाबीन बियाणे (JS-9305) चा नवीन साठा उद्या उपलब्ध होणार आहे. मर्यादित साठा असल्यामुळे पूर्व-बुकिंग करून ठेवा.\n• २० जूनपूर्वी पेमेंट भरणाऱ्या सर्व ऑर्डर्सना ५० ते ७५ रुपये प्रति बॅग अतिरिक्त सवलत मिळेल.'
-                : '• New stock of Soybean seeds (JS-9305) arriving tomorrow. Limited quantities, please pre-book early.\n• All bookings completed with payment realization before June 20 eligible for early discount schemes.',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade800,
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -526,7 +510,7 @@ class _HomeTab extends StatelessWidget {
             style: GoogleFonts.outfit(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: Colors.white.withOpacity(0.8),
+              color: Colors.white.withValues(alpha: 0.8),
             ),
           ),
           const SizedBox(height: 4),
@@ -579,336 +563,12 @@ class _HomeTab extends StatelessWidget {
     );
   }
 
-  Widget _buildSchemesCarousel(BuildContext context, bool isMarathi) {
-    final schemes = [
-      {
-        'title': isMarathi ? 'दप्तरी कापूस बियाणे बुकिंग योजना' : 'Daftari Cotton Seed Booking',
-        'subtitle': isMarathi ? '₹१६० प्रति पॅकेटपर्यंत बचत करा!' : 'Save up to ₹160 per packet!',
-        'tag': isMarathi ? 'कापूस बुकिंग' : 'Cotton Booking',
-        'isCotton': true,
-        'color': const Color(0xFFE65100),
-      },
-      {
-        'title': isMarathi ? 'मका रोहित ५६ बुकिंग योजना' : 'Rohit 56 Maize Seed Booking',
-        'subtitle': isMarathi ? '₹२०० प्रति बॅगपर्यंत बचत करा!' : 'Save up to ₹200 per bag!',
-        'tag': isMarathi ? 'मका बुकिंग' : 'Maize Booking',
-        'isCotton': false,
-        'color': const Color(0xFF1B5E20),
-      }
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          child: Text(
-            isMarathi ? 'सक्रिय बुकिंग योजना' : 'Active Booking Schemes',
-            style: GoogleFonts.outfit(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF263238),
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 120,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: schemes.length,
-            itemBuilder: (context, index) {
-              final scheme = schemes[index];
-              return Container(
-                width: MediaQuery.of(context).size.width * 0.8,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                child: Card(
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  color: (scheme['color'] as Color).withOpacity(0.08),
-                  child: InkWell(
-                    onTap: () => _showSchemeDetailsDialog(
-                      context,
-                      scheme['isCotton'] as bool,
-                      isMarathi,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: scheme['color'] as Color,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    scheme['tag'] as String,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  scheme['title'] as String,
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: const Color(0xFF263238),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  scheme['subtitle'] as String,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade700,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.arrow_circle_right_rounded,
-                            color: scheme['color'] as Color,
-                            size: 32,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCategoriesGrid(BuildContext context, ProductProvider provider, bool isMarathi) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildCategoryCard(
-              context,
-              title: isMarathi ? 'बियाणे' : 'Seeds',
-              subtitle: isMarathi ? 'दर्जेदार बियाणे' : 'High quality seeds',
-              icon: Icons.spa_rounded,
-              color: const Color(0xFF1B5E20),
-              onTap: () {
-                provider.filterByCategory('Seeds');
-              },
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: _buildCategoryCard(
-              context,
-              title: isMarathi ? 'खते' : 'Fertilizers',
-              subtitle: isMarathi ? 'उत्कृष्ट खते' : 'Best soil nutrition',
-              icon: Icons.grass_rounded,
-              color: const Color(0xFFE65100),
-              onTap: () {
-                provider.filterByCategory('Fertilizers');
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCategoryCard(
-    BuildContext context, {
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      height: 90,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            spreadRadius: 1,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(
-          color: Colors.grey.shade100,
-          width: 1,
-        ),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 24),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF263238),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBrandsSection(BuildContext context, ProductProvider provider, bool isMarathi) {
-    final brands = AppConstants.brands;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-          child: Text(
-            isMarathi ? 'कंपन्यांनुसार खरेदी करा' : 'Shop by Company',
-            style: GoogleFonts.outfit(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF263238),
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 90,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: brands.length,
-            itemBuilder: (context, index) {
-              final brand = brands[index];
-              final logo = _getBrandLogo(brand);
-
-              return Container(
-                width: 90,
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                child: Column(
-                  children: [
-                    InkWell(
-                      onTap: () {
-                        provider.filterByBrand(brand);
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        height: 60,
-                        width: 60,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
-                              blurRadius: 8,
-                              spreadRadius: 1,
-                            ),
-                          ],
-                          border: Border.all(
-                            color: Colors.grey.shade200,
-                            width: 1,
-                          ),
-                        ),
-                        child: logo != null
-                            ? Image.asset(
-                                logo,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return _buildBrandInitialsBadge(brand);
-                                },
-                              )
-                            : _buildBrandInitialsBadge(brand),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      brand,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade700,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildBrandInitialsBadge(String name) {
     final initials = name.split(' ').map((e) => e[0]).take(2).join('').toUpperCase();
     return Container(
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: const Color(0xFF1B5E20).withOpacity(0.1),
+        color: const Color(0xFF1B5E20).withValues(alpha: 0.1),
         shape: BoxShape.circle,
       ),
       child: Text(
@@ -920,129 +580,6 @@ class _HomeTab extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _buildCropsSection(BuildContext context, ProductProvider provider, bool isMarathi) {
-    final crops = provider.cropTypes;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-          child: Text(
-            isMarathi ? 'पिकांनुसार खरेदी करा' : 'Shop by Crop',
-            style: GoogleFonts.outfit(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF263238),
-            ),
-          ),
-        ),
-        SizedBox(
-          height: 95,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: crops.length,
-            itemBuilder: (context, index) {
-              final crop = crops[index];
-              final labelText = isMarathi
-                  ? (AppConstants.cropTypesMr[crop] ?? crop)
-                  : crop;
-              final iconData = _getCropIcon(crop);
-              final color = _getCropColor(crop);
-
-              return Container(
-                width: 85,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                child: Column(
-                  children: [
-                    InkWell(
-                      onTap: () {
-                        provider.filterByCropType(crop);
-                      },
-                      borderRadius: BorderRadius.circular(25),
-                      child: Container(
-                        height: 50,
-                        width: 50,
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: color.withOpacity(0.2),
-                            width: 1,
-                          ),
-                        ),
-                        child: Icon(
-                          iconData,
-                          color: color,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      labelText,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade700,
-                      ),
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  IconData _getCropIcon(String crop) {
-    switch (crop.toLowerCase()) {
-      case 'cotton':
-        return Icons.cloud_rounded;
-      case 'soybean':
-        return Icons.grain_rounded;
-      case 'wheat':
-        return Icons.grass_rounded;
-      case 'rice':
-        return Icons.water_drop_rounded;
-      case 'vegetable':
-        return Icons.local_florist_rounded;
-      case 'maize':
-        return Icons.eco_rounded;
-      case 'pigeon pea':
-        return Icons.nature_people_rounded;
-      default:
-        return Icons.spa_rounded;
-    }
-  }
-
-  Color _getCropColor(String crop) {
-    switch (crop.toLowerCase()) {
-      case 'cotton':
-        return const Color(0xFF607D8B);
-      case 'soybean':
-        return const Color(0xFFFF9800);
-      case 'wheat':
-        return const Color(0xFFFFC107);
-      case 'rice':
-        return const Color(0xFF2196F3);
-      case 'vegetable':
-        return const Color(0xFF4CAF50);
-      case 'maize':
-        return const Color(0xFF8BC34A);
-      case 'pigeon pea':
-        return const Color(0xFF795548);
-      default:
-        return const Color(0xFF009688);
-    }
   }
 
   Widget _buildFilteredCatalog(BuildContext context, ProductProvider provider, bool isMarathi) {
@@ -1131,7 +668,7 @@ class _HomeTab extends StatelessWidget {
                   onPressed: () => _showFilterBottomSheet(context, provider, isMarathi),
                   icon: const Icon(Icons.filter_alt_rounded),
                   style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D32).withOpacity(0.08),
+                    backgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                     foregroundColor: const Color(0xFF2E7D32),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -1161,7 +698,7 @@ class _HomeTab extends StatelessWidget {
                       ),
                       onDeleted: () => provider.filterByCategory(null),
                       deleteIconColor: const Color(0xFF2E7D32),
-                      backgroundColor: const Color(0xFF2E7D32).withOpacity(0.08),
+                      backgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                       side: const BorderSide(color: Color(0xFF2E7D32)),
                     ),
                   ),
@@ -1172,7 +709,7 @@ class _HomeTab extends StatelessWidget {
                       label: Text(provider.selectedBrand!),
                       onDeleted: () => provider.filterByBrand(null),
                       deleteIconColor: const Color(0xFFFF8F00),
-                      backgroundColor: const Color(0xFFFF8F00).withOpacity(0.08),
+                      backgroundColor: const Color(0xFFFF8F00).withValues(alpha: 0.08),
                       side: const BorderSide(color: Color(0xFFFF8F00)),
                     ),
                   ),
@@ -1187,7 +724,7 @@ class _HomeTab extends StatelessWidget {
                       ),
                       onDeleted: () => provider.filterByCropType(null),
                       deleteIconColor: const Color(0xFFE65100),
-                      backgroundColor: const Color(0xFFE65100).withOpacity(0.08),
+                      backgroundColor: const Color(0xFFE65100).withValues(alpha: 0.08),
                       side: const BorderSide(color: Color(0xFFE65100)),
                     ),
                   ),
@@ -1224,7 +761,7 @@ class _HomeTab extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7D32).withOpacity(0.08),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -1314,236 +851,6 @@ class _HomeTab extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-
-  void _showSchemeDetailsDialog(BuildContext context, bool isCotton, bool isMarathi) {
-    final title = isCotton
-        ? (isMarathi ? 'दप्तरी कापूस बियाणे बुकिंग योजना' : 'Daftari Cotton Seed Booking Scheme')
-        : (isMarathi ? 'दप्तरी मका रोहित ५६ सुधारित योजना' : 'Daftari Rohit 56 Maize Booking Scheme');
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        titlePadding: EdgeInsets.zero,
-        title: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: const BoxDecoration(
-            color: Color(0xFF1B5E20),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isCotton ? Icons.spa_rounded : Icons.eco_rounded,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: GoogleFonts.outfit(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF8F00).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFF8F00).withOpacity(0.3)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.timer_outlined, color: Color(0xFFE65100), size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        isMarathi
-                            ? 'मुदत सूचना: २० जूनपूर्वी पेमेंट केल्यास जास्तीत जास्त सवलत मिळेल (फक्त १२ दिवस शिल्लक!)'
-                            : 'Milestone: Payments before June 20 get maximum discount (closes in 12 days!)',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFFE65100),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isCotton) ...[
-                _buildSchemeRow(
-                  label: isMarathi ? 'सामान्य सवलत:' : 'Normal Discount:',
-                  value: '₹70 / Packet',
-                  isBold: true,
-                ),
-                const Divider(),
-                Text(
-                  isMarathi ? 'रोख सवलत योजना (कापूस बुकिंग):' : 'Cash Discount Scheme (Cotton Booking):',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20)),
-                ),
-                const SizedBox(height: 6),
-                _buildSchemeRow(
-                  label: isMarathi ? '२० जूनपूर्वी देयक भरल्यास:' : 'Payment before 20 June:',
-                  value: '₹65 (Total ₹160/pkt)',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? '०५ जुलैपूर्वी देयक भरल्यास:' : 'Payment before 05 July:',
-                  value: '₹55 (Total ₹150/pkt)',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? '२० जुलैपूर्वी देयक भरल्यास:' : 'Payment before 20 July:',
-                  value: '₹45 (Total ₹140/pkt)',
-                ),
-                const Divider(),
-                Text(
-                  isMarathi ? 'नो सेल रिटर्न डिस्काउंट (निव्वळ विक्रीवर):' : 'No Sale Return Discount (On Net Sale):',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20)),
-                ),
-                const SizedBox(height: 6),
-                _buildSchemeRow(label: 'Scheme A (100%):', value: '₹40 / pkt'),
-                _buildSchemeRow(label: 'Scheme B (90%):', value: '₹35 / pkt'),
-                _buildSchemeRow(label: 'Scheme C (80%):', value: '₹30 / pkt'),
-                _buildSchemeRow(label: 'Scheme D (70%):', value: '₹25 / pkt'),
-              ] else ...[
-                _buildSchemeRow(
-                  label: isMarathi ? 'बुकिंग प्रकार:' : 'Booking Requirement:',
-                  value: isMarathi ? '८ बॅग्सच्या पटीत (४ किलो पॅकिंग)' : 'Multiples of 8 bags (4kg Packing)',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? 'मूळ किंमत:' : 'Original Price:',
-                  value: '₹1350 / Bag',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? 'बुकिंग रक्कम:' : 'Booking Amount:',
-                  value: '₹100 / Bag',
-                ),
-                const Divider(),
-                Text(
-                  isMarathi ? 'सवलत रचना (प्रति बॅग):' : 'Discount Structure (Per Bag):',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20)),
-                ),
-                const SizedBox(height: 6),
-                _buildSchemeRow(
-                  label: isMarathi ? 'बुकिंग सवलत:' : 'Booking Discount:',
-                  value: '₹50 / Bag',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? 'सामान्य सवलत:' : 'Normal Discount:',
-                  value: '₹75 / Bag',
-                ),
-                const Divider(),
-                Text(
-                  isMarathi ? 'रोख सवलत (२० जूनपूर्वी भरणा केल्यास):' : 'Cash Discount (Payment before 20 June):',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20)),
-                ),
-                const SizedBox(height: 6),
-                _buildSchemeRow(
-                  label: isMarathi ? '४८ बॅग्सपेक्षा कमी बुकिंगवर:' : 'Under 48 Bags:',
-                  value: '₹60 / Bag',
-                ),
-                _buildSchemeRow(
-                  label: isMarathi ? '४८ बॅग्सपेक्षा जास्त बुकिंगवर:' : 'Over 48 Bags:',
-                  value: '₹75 / Bag',
-                ),
-              ],
-              const Divider(height: 24),
-              Text(
-                isMarathi ? 'महत्त्वाच्या अटी व शर्ती:' : 'Terms & Conditions:',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                isMarathi
-                    ? '१. देयक रक्कम कंपनीच्या खात्यात जमा झाल्यावरच सवलत लागू होईल.\n२. कापूस बियाण्यावर सामान्य रोख टक्केवारी सवलत लागू नाही.\n३. कोणत्याही विवादाच्या वेळी कंपनीचा निर्णय अंतिम असेल.'
-                    : '1. Scheme benefits apply only upon successful payment realization in company accounts.\n2. Maize and cotton schemes are subject to specific conditions.\n3. The company reserves the right to modify the schemes.',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          ElevatedButton.icon(
-            onPressed: () async {
-              final String schemeName = isCotton ? 'Cotton Seed Booking Scheme' : 'Maize Seed Booking Scheme';
-              final String message = 'Hello Shantinath Agro, I am interested in the $schemeName. Please contact me.';
-              final encodedMessage = Uri.encodeComponent(message);
-              final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
-              final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
-              final url = 'https://wa.me/$formattedPhone?text=$encodedMessage';
-              final uri = Uri.parse(url);
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
-            },
-            icon: const Icon(Icons.chat_outlined, size: 16),
-            label: Text(isMarathi ? 'व्हॉट्सॲप चौकशी' : 'Inquire on WhatsApp'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF25D366),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              isMarathi ? 'बंद करा' : 'Close',
-              style: const TextStyle(color: Color(0xFF1B5E20), fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSchemeRow({
-    required String label,
-    required String value,
-    bool isBold = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-                color: Colors.grey.shade800,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF2E7D32),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

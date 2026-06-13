@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
+import 'package:shantinath_agro/widgets/otp_verification_sheet.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,10 +17,7 @@ class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isAdminMode = false;
   bool _isLoading = false;
-  bool _obscurePassword = true;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnimation;
@@ -29,7 +26,6 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
-    _phoneController.addListener(_onPhoneChanged);
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -46,21 +42,9 @@ class _LoginScreenState extends State<LoginScreen>
     _animController.forward();
   }
 
-  void _onPhoneChanged() {
-    final phone = _phoneController.text.trim();
-    final isAdminPhone = phone == AppConstants.adminPhone;
-    if (isAdminPhone != _isAdminMode) {
-      setState(() {
-        _isAdminMode = isAdminPhone;
-      });
-    }
-  }
-
   @override
   void dispose() {
-    _phoneController.removeListener(_onPhoneChanged);
     _phoneController.dispose();
-    _passwordController.dispose();
     _animController.dispose();
     super.dispose();
   }
@@ -69,20 +53,45 @@ class _LoginScreenState extends State<LoginScreen>
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
+    final phone = _phoneController.text.trim();
 
     try {
       final authProvider = context.read<AuthProvider>();
-      final success = await authProvider.login(
-        _phoneController.text.trim(),
-        _isAdminMode ? _passwordController.text.trim() : '',
-      );
+      final success = await authProvider.sendOtp(phone);
 
       if (!mounted) return;
 
-      if (success && authProvider.isLoggedIn) {
-        Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+      if (success) {
+        // Show the verification OTP sheet
+        final verified = await showModalBottomSheet<bool>(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.white,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+          ),
+          builder: (_) => OtpVerificationSheet(
+            phone: phone,
+            onVerify: (otp) => authProvider.verifyOtpAndLogin(phone, otp),
+            onResend: () => authProvider.sendOtp(phone),
+          ),
+        );
+
+        if (!mounted) return;
+
+        if (verified == true) {
+          if (authProvider.isLoggedIn) {
+            Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+          } else {
+            // OTP is verified, but customer is not registered. Go to registration screen.
+            Navigator.of(context).pushNamed(AppRoutes.register, arguments: phone);
+          }
+        }
       } else {
-        throw Exception(authProvider.errorMessage ?? 'Login failed');
+        throw Exception(authProvider.errorMessage ?? 'Failed to send OTP code');
       }
     } catch (e) {
       if (!mounted) return;
@@ -123,12 +132,10 @@ class _LoginScreenState extends State<LoginScreen>
                       // Form
                       _buildForm(),
                       const SizedBox(height: 28),
-                      // Login / Register button
+                      // Login / OTP trigger button
                       _buildPrimaryButton(),
-                      if (!_isAdminMode) ...[
-                        const SizedBox(height: 16),
-                        _buildRegisterLink(),
-                      ],
+                      const SizedBox(height: 16),
+                      _buildRegisterLink(),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -169,7 +176,7 @@ class _LoginScreenState extends State<LoginScreen>
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.15),
+                    color: Colors.black.withValues(alpha: 0.15),
                     blurRadius: 20,
                     spreadRadius: 2,
                   ),
@@ -196,7 +203,7 @@ class _LoginScreenState extends State<LoginScreen>
               style: GoogleFonts.outfit(
                 fontSize: 20,
                 fontWeight: FontWeight.w300,
-                color: Colors.white.withOpacity(0.85),
+                color: Colors.white.withValues(alpha: 0.85),
                 letterSpacing: 4,
               ),
             ),
@@ -205,8 +212,6 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-
-
 
   Widget _buildForm() {
     return Form(
@@ -233,36 +238,6 @@ class _LoginScreenState extends State<LoginScreen>
               return null;
             },
           ),
-          if (_isAdminMode) ...[
-            const SizedBox(height: 18),
-            _buildTextField(
-              controller: _passwordController,
-              label: 'Password',
-              hint: 'Enter admin password',
-              icon: Icons.lock_rounded,
-              obscureText: _obscurePassword,
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_off_rounded
-                      : Icons.visibility_rounded,
-                  color: Colors.grey.shade500,
-                ),
-                onPressed: () {
-                  setState(() => _obscurePassword = !_obscurePassword);
-                },
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Password is required';
-                }
-                if (value.length < 4) {
-                  return 'Password must be at least 4 characters';
-                }
-                return null;
-              },
-            ),
-          ],
         ],
       ),
     );
@@ -275,22 +250,18 @@ class _LoginScreenState extends State<LoginScreen>
     required IconData icon,
     TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
-    bool obscureText = false,
-    Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
-      obscureText: obscureText,
       validator: validator,
       style: const TextStyle(fontSize: 16),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon, color: const Color(0xFF2E7D32)),
-        suffixIcon: suffixIcon,
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
@@ -330,9 +301,9 @@ class _LoginScreenState extends State<LoginScreen>
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF2E7D32),
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF2E7D32).withOpacity(0.6),
+          disabledBackgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.6),
           elevation: 4,
-          shadowColor: const Color(0xFF2E7D32).withOpacity(0.4),
+          shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -347,7 +318,7 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
               )
             : Text(
-                _isAdminMode ? 'Login as Admin' : 'Login',
+                'Get OTP Verification Code',
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,

@@ -72,9 +72,9 @@ class AppConstants {
     'Pigeon Pea': 'तूर',
   };
 
-  // ── Admin Credentials ──────────────────────────────────────────────────
+  // ── Firebase Auth / OTP Config ──────────────────────────────────────────
+  static const bool useMockOtp = true; // Set to false to use real Firebase Phone Auth
   static const String adminPhone = '9999999999';
-  static const String adminPassword = 'admin123';
   static const String adminName = 'Admin';
 
   // ── Validation ─────────────────────────────────────────────────────────

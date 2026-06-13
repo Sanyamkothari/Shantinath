@@ -163,21 +163,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     );
   }
 
-  IconData _getCategoryIcon(String category) {
-    switch (category.toLowerCase()) {
-      case 'seeds':
-        return Icons.grass_rounded;
-      case 'fertilizers':
-      case 'fertilizer':
-        return Icons.science_rounded;
-      case 'pesticides':
-      case 'pesticide':
-        return Icons.bug_report_rounded;
-      default:
-        return Icons.eco_rounded;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final product = widget.product;
@@ -238,7 +223,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       leading: Container(
         margin: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.2),
+          color: Colors.black.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(12),
         ),
         child: IconButton(
@@ -250,7 +235,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(12),
           ),
           child: IconButton(
@@ -286,9 +271,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Colors.black.withOpacity(0.35),
+                      Colors.black.withValues(alpha: 0.35),
                       Colors.transparent,
-                      Colors.black.withOpacity(0.15),
+                      Colors.black.withValues(alpha: 0.15),
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -312,7 +297,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             decoration: BoxDecoration(
-              color: const Color(0xFFFF8F00).withOpacity(0.12),
+              color: const Color(0xFFFF8F00).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -402,9 +387,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.15)),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -433,7 +418,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -501,7 +486,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -540,13 +525,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: inStock
-              ? const Color(0xFF2E7D32).withOpacity(0.08)
-              : Colors.red.withOpacity(0.08),
+              ? const Color(0xFF2E7D32).withValues(alpha: 0.08)
+              : Colors.red.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: inStock
-                ? const Color(0xFF2E7D32).withOpacity(0.2)
-                : Colors.red.withOpacity(0.2),
+                ? const Color(0xFF2E7D32).withValues(alpha: 0.2)
+                : Colors.red.withValues(alpha: 0.2),
           ),
         ),
         child: Row(
@@ -584,7 +569,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -684,7 +669,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.grey.shade300,
                   elevation: 2,
-                  shadowColor: const Color(0xFF2E7D32).withOpacity(0.3),
+                  shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.3),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),

@@ -86,7 +86,7 @@ class ProfileScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.02),
+                      color: Colors.black.withValues(alpha: 0.02),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -182,7 +182,7 @@ class ProfileScreen extends StatelessWidget {
                             onChanged: (_) {
                               localeProvider.toggleLocale();
                             },
-                            activeColor: const Color(0xFF2E7D32),
+                            activeThumbColor: const Color(0xFF2E7D32),
                           ),
                         ],
                       ),
@@ -282,7 +282,7 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _buildBusinessDetailsCard(BuildContext context, UserModel user, bool isMarathi) {
-    Widget _buildDetailRow(String label, String value, IconData icon) {
+    Widget buildDetailRow(String label, String value, IconData icon) {
       if (value.isEmpty) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -328,7 +328,7 @@ class ProfileScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -353,17 +353,17 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'फर्मचे नाव' : 'Firm Name',
             user.firmName,
             Icons.storefront_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'मालकाचे नाव' : 'Proprietor Name',
             user.proprietorName,
             Icons.assignment_ind_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'ग्राहक प्रकार' : 'Customer Type',
             user.customerType.isEmpty 
                 ? '' 
@@ -372,37 +372,37 @@ class ProfileScreen extends StatelessWidget {
                     : (isMarathi ? 'किरकोळ विक्रेता (Retailer)' : 'Retailer')),
             Icons.badge_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'तालुका' : 'Taluka',
             user.taluka,
             Icons.map_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'जिल्हा' : 'District',
             user.district,
             Icons.my_location_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'जीएसटी क्रमांक' : 'GST Number',
             user.gstNo,
             Icons.percent_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'बियाणे परवाना क्रमांक' : 'Seed License Number',
             user.seedLicenceNumber,
             Icons.receipt_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'खत परवाना क्रमांक' : 'Fertilizer License Number',
             user.fertilizerLicenceNumber,
             Icons.science_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? '२ रा परवाना क्रमांक' : '2nd License Number',
             user.secondLicenceNumber,
             Icons.description_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'खात आयडी क्रमांक' : 'Khat ID Number',
             user.khatIdNo,
             Icons.tag_rounded,

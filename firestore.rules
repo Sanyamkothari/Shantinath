@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Checks if the authenticated user's phone number matches the document ID (which is a 10-digit phone number)
+    // Note: request.auth.token.phone_number is in "+91XXXXXXXXXX" format
+    function isOwner(phoneId) {
+      return isAuthenticated() && 
+        (request.auth.token.phone_number == '+91' + phoneId || 
+         request.auth.token.phone_number == phoneId);
+    }
+
+    // Checks if the authenticated user is registered as an admin in Firestore
+    function isAdmin() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.token.phone_number)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.token.phone_number)).data.role == 'admin';
+    }
+
+    // Users Collection
+    match /users/{phoneId} {
+      // Anyone authenticating needs to check if a phone exists during login/registration
+      allow read: if isAuthenticated() && (isOwner(phoneId) || isAdmin());
+      // A user can create their own profile during registration
+      allow create: if isAuthenticated() && isOwner(phoneId);
+      // Only the owner or an admin can update/delete a user profile
+      allow update, delete: if isAuthenticated() && (isOwner(phoneId) || isAdmin());
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      // Products can be read by anyone (including unauthenticated visitors looking at the catalog)
+      allow read: if true;
+      // Only admins can create, update, or delete products
+      allow write: if isAdmin();
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      // Standard users can only view their own orders. Admins can view all orders.
+      allow read: if isAuthenticated() && (resource.data.customerId == request.auth.token.phone_number || resource.data.customerId == request.auth.token.phone_number.replace('\\+91', '') || isAdmin());
+      // Standard users can create orders if the order matches their identity. Admins can create orders.
+      allow create: if isAuthenticated() && (request.resource.data.customerId == request.auth.token.phone_number || request.resource.data.customerId == request.auth.token.phone_number.replace('\\+91', '') || isAdmin());
+      // Only admins can update (status) or delete orders.
+      allow update, delete: if isAdmin();
+    }
+  }
+}

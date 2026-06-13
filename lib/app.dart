@@ -5,10 +5,12 @@ import 'package:provider/provider.dart';
 import 'package:shantinath_agro/config/theme.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
+import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/screens/splash/splash_screen.dart';
 import 'package:shantinath_agro/screens/auth/login_screen.dart';
 import 'package:shantinath_agro/screens/auth/register_screen.dart';
 import 'package:shantinath_agro/screens/home/home_screen.dart';
+import 'package:shantinath_agro/screens/home/company_products_screen.dart';
 import 'package:shantinath_agro/screens/home/product_detail_screen.dart';
 import 'package:shantinath_agro/screens/cart/cart_screen.dart';
 import 'package:shantinath_agro/screens/orders/order_history_screen.dart';
@@ -48,24 +50,61 @@ class ShantinathAgroApp extends StatelessWidget {
       ],
       initialRoute: AppRoutes.splash,
       onGenerateRoute: (settings) {
+        final authProvider = context.read<AuthProvider>();
+        final isLoggedIn = authProvider.isLoggedIn;
+        final isAdmin = authProvider.isAdmin;
+
+        // Centralized Guards: Require login for all screens except splash, login, and register
+        if (!isLoggedIn &&
+            settings.name != AppRoutes.splash &&
+            settings.name != AppRoutes.login &&
+            settings.name != AppRoutes.register) {
+          return _buildRoute(const LoginScreen(), settings);
+        }
+
+        // Centralized Guards: Restrict admin routes to admin users only
+        if (settings.name != null &&
+            settings.name!.startsWith('/admin') &&
+            !isAdmin) {
+          return _buildRoute(const HomeScreen(), settings);
+        }
+
         switch (settings.name) {
           case AppRoutes.splash:
             return _buildRoute(const SplashScreen(), settings);
           case AppRoutes.login:
+            if (isLoggedIn) {
+              return _buildRoute(const HomeScreen(), settings);
+            }
             return _buildRoute(const LoginScreen(), settings);
           case AppRoutes.register:
+            if (isLoggedIn) {
+              return _buildRoute(const HomeScreen(), settings);
+            }
             return _buildRoute(const RegisterScreen(), settings);
           case AppRoutes.home:
             return _buildRoute(const HomeScreen(), settings);
+          case AppRoutes.companyProducts:
+            final brand = settings.arguments as String?;
+            if (brand == null || brand.isEmpty) {
+              return _buildRoute(const HomeScreen(), settings);
+            }
+            return _buildRoute(CompanyProductsScreen(brand: brand), settings);
           case AppRoutes.productDetail:
-            final product = settings.arguments as Product;
+            final product = settings.arguments as Product?;
+            if (product == null) {
+              return _buildRoute(const HomeScreen(), settings);
+            }
             return _buildRoute(ProductDetailScreen(product: product), settings);
           case AppRoutes.cart:
             return _buildRoute(const CartScreen(), settings);
           case AppRoutes.orderHistory:
             return _buildRoute(const OrderHistoryScreen(), settings);
           case AppRoutes.orderDetail:
-            final order = settings.arguments as Order;
+            final order = settings.arguments as Order?;
+            if (order == null) {
+              return _buildRoute(const OrderHistoryScreen(), settings);
+            }
             return _buildRoute(OrderDetailScreen(order: order), settings);
           case AppRoutes.profile:
             return _buildRoute(const ProfileScreen(), settings);

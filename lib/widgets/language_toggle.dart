@@ -19,11 +19,11 @@ class LanguageToggle extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           border: Border.all(
-            color: Theme.of(context).primaryColor.withOpacity(0.5),
+            color: Theme.of(context).primaryColor.withValues(alpha: 0.5),
             width: 1.5,
           ),
           borderRadius: BorderRadius.circular(20),
-          color: Theme.of(context).primaryColor.withOpacity(0.1),
+          color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
