@@ -5,7 +5,11 @@ import 'package:google_fonts/google_fonts.dart';
 
 class OtpVerificationSheet extends StatefulWidget {
   final String phone;
-  final Future<bool> Function(String otp) onVerify;
+
+  /// Verifies [otp]. Returns null on success, or a user-facing error message
+  /// describing why verification failed (so the real cause is shown rather
+  /// than a generic "incorrect code").
+  final Future<String?> Function(String otp) onVerify;
   final Future<bool> Function() onResend;
 
   const OtpVerificationSheet({
@@ -98,16 +102,16 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
       _errorMsg = null;
     });
 
-    final success = await widget.onVerify(otp);
+    final error = await widget.onVerify(otp);
 
     if (!mounted) return;
 
-    if (success) {
+    if (error == null) {
       Navigator.of(context).pop(true);
     } else {
       setState(() {
         _isLoading = false;
-        _errorMsg = 'Incorrect OTP code. Please try again.';
+        _errorMsg = error;
       });
       // Clear OTP and reset focus
       for (var controller in _controllers) {

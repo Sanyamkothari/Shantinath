@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/models/user_model.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
+import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/services/auth_service.dart';
+import 'package:shantinath_agro/utils/csv_export_helper.dart';
 
 /// Represents an aggregated customer from order data.
 class _CustomerInfo {
@@ -45,45 +49,17 @@ class _CustomerDirectoryScreenState extends State<CustomerDirectoryScreen> {
     super.dispose();
   }
 
-  List<_CustomerInfo> _extractCustomers(List<Order> orders) {
-    final Map<String, _CustomerInfo> customerMap = {};
-
-    for (final order in orders) {
-      final key = order.customerPhone;
-      if (customerMap.containsKey(key)) {
-        final existing = customerMap[key]!;
-        customerMap[key] = _CustomerInfo(
-          name: existing.name,
-          phone: existing.phone,
-          village: existing.village,
-          orderCount: existing.orderCount + 1,
-          totalSpent: existing.totalSpent + order.totalAmount,
-          orders: [...existing.orders, order],
-        );
-      } else {
-        customerMap[key] = _CustomerInfo(
-          name: order.customerName,
-          phone: order.customerPhone,
-          village: order.customerVillage,
-          orderCount: 1,
-          totalSpent: order.totalAmount,
-          orders: [order],
-        );
-      }
-    }
-
-    final customers = customerMap.values.toList();
-    customers.sort((a, b) => b.orderCount.compareTo(a.orderCount));
-    return customers;
-  }
-
-  List<_CustomerInfo> _filterCustomers(List<_CustomerInfo> customers) {
-    if (_searchQuery.isEmpty) return customers;
+  List<UserModel> _filterUsers(List<UserModel> users) {
+    if (_searchQuery.isEmpty) return users;
     final q = _searchQuery.toLowerCase();
-    return customers.where((c) {
-      return c.name.toLowerCase().contains(q) ||
-          c.phone.contains(q) ||
-          c.village.toLowerCase().contains(q);
+    return users.where((u) {
+      return u.name.toLowerCase().contains(q) ||
+          u.firmName.toLowerCase().contains(q) ||
+          u.proprietorName.toLowerCase().contains(q) ||
+          u.phone.contains(q) ||
+          u.village.toLowerCase().contains(q) ||
+          u.taluka.toLowerCase().contains(q) ||
+          u.district.toLowerCase().contains(q);
     }).toList();
   }
 
@@ -114,166 +90,381 @@ class _CustomerDirectoryScreenState extends State<CustomerDirectoryScreen> {
     }
   }
 
-  void _showOrderHistory(BuildContext context, _CustomerInfo customer) {
+  void _showOrderHistoryForUser(BuildContext context, UserModel user, List<Order> allOrders) {
+    final userOrders = allOrders.where((o) => o.customerPhone == user.phone).toList();
+    final customerInfo = _CustomerInfo(
+      name: user.firmName.isNotEmpty ? user.firmName : user.name,
+      phone: user.phone,
+      village: user.village,
+      orderCount: userOrders.length,
+      totalSpent: userOrders.fold<double>(0, (acc, o) => acc + o.totalAmount),
+      orders: userOrders,
+    );
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _OrderHistorySheet(customer: customer),
+      builder: (ctx) => _OrderHistorySheet(customer: customerInfo),
     );
+  }
+
+  Future<void> _exportCustomersCsv(List<UserModel> users) async {
+    final authProvider = context.read<AuthProvider>();
+    final canViewBalances = authProvider.can('viewCustomerBalances');
+    try {
+      final headers = [
+        'Firm Name',
+        'Proprietor Name',
+        'Phone Number',
+        'Village/City',
+        'Taluka',
+        'District',
+        'Outstanding Balance',
+        'Balance Type',
+        'Approval Status'
+      ];
+      final rows = <List<dynamic>>[];
+      for (final u in users) {
+        double balance = 0.0;
+        String balanceType = 'Dr';
+        if (canViewBalances) {
+          final financialsDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(u.phone)
+              .collection('private')
+              .doc('financials')
+              .get();
+          if (financialsDoc.exists) {
+            final data = financialsDoc.data();
+            if (data != null) {
+              balance = (data['outstandingBalance'] as num?)?.toDouble() ?? 0.0;
+              balanceType = data['balanceType'] as String? ?? 'Dr';
+            }
+          }
+        }
+        rows.add([
+          u.firmName,
+          u.proprietorName,
+          u.phone,
+          u.village,
+          u.taluka,
+          u.district,
+          balance,
+          balanceType,
+          u.isApproved ? 'Approved' : 'Pending',
+        ]);
+      }
+
+      final csv = CsvExportHelper.convertToCsv(headers, rows);
+      await CsvExportHelper.exportAndShareCsv(
+        fileName: 'customer_directory_${DateTime.now().millisecondsSinceEpoch}.csv',
+        csvContent: csv,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export CSV: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _approveCustomer(BuildContext context, UserModel user) async {
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.can('approveUsers')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error: You do not have permission to approve registrations.'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    try {
+      await authProvider.approveUser(user.phone, true);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Approved "${user.firmName.isNotEmpty ? user.firmName : user.name}" successfully.'),
+            backgroundColor: const Color(0xFF2E7D32),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to approve customer: $e'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final orderProvider = context.watch<OrderProvider>();
-    final allCustomers = _extractCustomers(orderProvider.orders);
-    final customers = _filterCustomers(allCustomers);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F0),
-      appBar: AppBar(
-        title: Text(
-          'Customer Directory',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 20),
-        ),
-        backgroundColor: const Color(0xFF2E7D32),
-        foregroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
-      body: Column(
-        children: [
-          // Search bar
-          Container(
-            color: const Color(0xFF2E7D32),
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+    return DefaultTabController(
+      length: 2,
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('users').snapshots(),
+        builder: (context, snapshot) {
+          final docs = snapshot.data?.docs ?? [];
+          final allUsers = docs
+              .map((doc) => UserModel.fromJson(doc.data() as Map<String, dynamic>))
+              .where((u) => u.role == UserRole.customer) // Customer users only
+              .toList();
+
+          final filteredUsers = _filterUsers(allUsers);
+          final approvedUsers = filteredUsers.where((u) => u.isApproved).toList();
+          final pendingUsers = filteredUsers.where((u) => !u.isApproved).toList();
+
+          return Scaffold(
+            backgroundColor: const Color(0xFFF5F5F0),
+            appBar: AppBar(
+              title: Text(
+                'Customer Management',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 20),
+              ),
+              backgroundColor: const Color(0xFF2E7D32),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.share_rounded),
+                  tooltip: 'Export CSV',
+                  onPressed: () => _exportCustomersCsv(allUsers),
+                ),
+                const SizedBox(width: 8),
+              ],
+              bottom: TabBar(
+                indicatorColor: Colors.white,
+                indicatorWeight: 3,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white70,
+                labelStyle: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15),
+                tabs: [
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Directory'),
+                        if (approvedUsers.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${approvedUsers.length}',
+                              style: const TextStyle(fontSize: 11, color: Colors.white),
+                            ),
+                          ),
+                        ]
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Pending'),
+                        if (pendingUsers.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFFF8F00),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '${pendingUsers.length}',
+                              style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ]
+                      ],
+                    ),
                   ),
                 ],
               ),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (v) => setState(() => _searchQuery = v),
-                decoration: InputDecoration(
-                  hintText: 'Search by name, phone, or village...',
-                  hintStyle: TextStyle(color: Colors.grey.shade400),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: Colors.grey.shade500,
-                  ),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(
-                            Icons.close_rounded,
-                            color: Colors.grey.shade500,
-                          ),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
+            ),
+            body: Column(
+              children: [
+                // Search bar
+                Container(
+                  color: const Color(0xFF2E7D32),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.08),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                      decoration: InputDecoration(
+                        hintText: 'Search by name, phone, or village...',
+                        hintStyle: TextStyle(color: Colors.grey.shade400),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: Colors.grey.shade500,
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  color: Colors.grey.shade500,
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ),
 
-          // Customer count
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Icon(Icons.people_rounded, size: 18, color: Colors.grey.shade600),
-                const SizedBox(width: 6),
-                Text(
-                  '${customers.length} customer${customers.length != 1 ? 's' : ''}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade600,
-                    fontWeight: FontWeight.w500,
+                // Tab Content
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      // Active Directory tab
+                      _buildDirectoryList(approvedUsers, orderProvider.orders),
+                      // Pending Approvals tab
+                      _buildPendingList(pendingUsers),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-
-          // Customer list
-          Expanded(
-            child: customers.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.people_outline_rounded,
-                          size: 72,
-                          color: Colors.grey.shade300,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No customers found',
-                          style: GoogleFonts.outfit(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey.shade500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Customers will appear here once orders are placed',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade400,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    itemCount: customers.length,
-                    itemBuilder: (context, index) {
-                      final customer = customers[index];
-                      return _CustomerCard(
-                        customer: customer,
-                        onCall: () => _callCustomer(customer.phone),
-                        onWhatsApp: () => _messageCustomer(customer.phone),
-                        onTap: () => _showOrderHistory(context, customer),
-                      );
-                    },
-                  ),
-          ),
-        ],
+          );
+        },
       ),
+    );
+  }
+
+  Widget _buildDirectoryList(List<UserModel> users, List<Order> allOrders) {
+    if (users.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.people_outline_rounded, size: 72, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text(
+              'No active customers found',
+              style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      itemCount: users.length,
+      itemBuilder: (context, index) {
+        final user = users[index];
+        final userOrders = allOrders.where((o) => o.customerPhone == user.phone).toList();
+
+        return _CustomerUserCard(
+          user: user,
+          orderCount: userOrders.length,
+          totalSpent: userOrders.fold<double>(0, (acc, o) => acc + o.totalAmount),
+          onCall: () => _callCustomer(user.phone),
+          onWhatsApp: () => _messageCustomer(user.phone),
+          onTap: () => _showOrderHistoryForUser(context, user, allOrders),
+        );
+      },
+    );
+  }
+
+  Widget _buildPendingList(List<UserModel> users) {
+    if (users.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_user_outlined, size: 72, color: Colors.grey.shade300),
+            const SizedBox(height: 16),
+            Text(
+              'No pending approvals',
+              style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'New customer registrations will appear here',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      itemCount: users.length,
+      itemBuilder: (context, index) {
+        final user = users[index];
+        return _PendingCustomerCard(
+          user: user,
+          onCall: () => _callCustomer(user.phone),
+          onWhatsApp: () => _messageCustomer(user.phone),
+          onApprove: () => _approveCustomer(context, user),
+        );
+      },
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Customer Card Widget
+// Approved Customer User Card
 // ---------------------------------------------------------------------------
-class _CustomerCard extends StatelessWidget {
-  final _CustomerInfo customer;
+class _CustomerUserCard extends StatelessWidget {
+  final UserModel user;
+  final int orderCount;
+  final double totalSpent;
   final VoidCallback onCall;
   final VoidCallback onWhatsApp;
   final VoidCallback onTap;
 
-  const _CustomerCard({
-    required this.customer,
+  const _CustomerUserCard({
+    required this.user,
+    required this.orderCount,
+    required this.totalSpent,
     required this.onCall,
     required this.onWhatsApp,
     required this.onTap,
@@ -281,6 +472,12 @@ class _CustomerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayName = user.firmName.isNotEmpty ? user.firmName : user.name;
+    final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final canViewBalances = authProvider.can('viewCustomerBalances');
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -309,9 +506,7 @@ class _CustomerCard extends StatelessWidget {
                   ),
                   child: Center(
                     child: Text(
-                      customer.name.isNotEmpty
-                          ? customer.name[0].toUpperCase()
-                          : '?',
+                      displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                       style: GoogleFonts.outfit(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
@@ -327,13 +522,27 @@ class _CustomerCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        customer.name,
+                        displayName,
                         style: GoogleFonts.outfit(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
                           color: const Color(0xFF212121),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                      if (user.proprietorName.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Prop: ${user.proprietorName}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Row(
                         children: [
@@ -345,7 +554,7 @@ class _CustomerCard extends StatelessWidget {
                           const SizedBox(width: 3),
                           Expanded(
                             child: Text(
-                              customer.village,
+                              user.village,
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey.shade600,
@@ -365,12 +574,11 @@ class _CustomerCard extends StatelessWidget {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF2E7D32)
-                                  .withValues(alpha: 0.08),
+                              color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              '${customer.orderCount} order${customer.orderCount != 1 ? 's' : ''}',
+                              '$orderCount order${orderCount != 1 ? 's' : ''}',
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
@@ -379,20 +587,73 @@ class _CustomerCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            '₹${customer.totalSpent.toStringAsFixed(0)} total',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade500,
-                              fontWeight: FontWeight.w500,
+                          if (canViewBalances)
+                            StreamBuilder<DocumentSnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(user.phone)
+                                  .collection('private')
+                                  .doc('financials')
+                                  .snapshots(),
+                              builder: (context, snapshot) {
+                                double outstandingBalance = 0.0;
+                                String balanceType = 'Dr';
+                                if (snapshot.hasData && snapshot.data!.exists) {
+                                  final data = snapshot.data!.data() as Map<String, dynamic>?;
+                                  if (data != null) {
+                                    outstandingBalance = (data['outstandingBalance'] as num?)?.toDouble() ?? 0.0;
+                                    balanceType = data['balanceType'] as String? ?? 'Dr';
+                                  }
+                                }
+                                final hasBalance = outstandingBalance != 0.0;
+                                final balanceColor = balanceType == 'Dr' ? const Color(0xFFC62828) : const Color(0xFF2E7D32);
+
+                                if (hasBalance) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: balanceColor.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${currencyFormat.format(outstandingBalance)} $balanceType',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: balanceColor,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  return Text(
+                                    '₹${totalSpent.toStringAsFixed(0)} total',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  );
+                                }
+                              },
+                            )
+                          else
+                            Text(
+                              '₹${totalSpent.toStringAsFixed(0)} total',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade500,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
-                // Call button
+                // Call & WhatsApp buttons
                 Material(
                   color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
@@ -442,6 +703,171 @@ class _CustomerCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Pending Customer Card Widget
+// ---------------------------------------------------------------------------
+class _PendingCustomerCard extends StatelessWidget {
+  final UserModel user;
+  final VoidCallback onCall;
+  final VoidCallback onWhatsApp;
+  final VoidCallback onApprove;
+
+  const _PendingCustomerCard({
+    required this.user,
+    required this.onCall,
+    required this.onWhatsApp,
+    required this.onApprove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = user.firmName.isNotEmpty ? user.firmName : user.name;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        elevation: 1.5,
+        shadowColor: Colors.black12,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF8F00).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.lock_clock_rounded,
+                        color: Color(0xFFFF8F00),
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF212121),
+                          ),
+                        ),
+                        if (user.proprietorName.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Proprietor: ${user.proprietorName}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              // Details
+              _buildDetailItem(Icons.phone_outlined, user.phone),
+              _buildDetailItem(Icons.location_on_outlined, '${user.village}, Tq: ${user.taluka}, Dist: ${user.district}'),
+              if (user.gstNo.isNotEmpty) _buildDetailItem(Icons.percent_rounded, 'GST: ${user.gstNo}'),
+              if (user.customerType.isNotEmpty)
+                _buildDetailItem(
+                  Icons.badge_outlined,
+                  user.customerType == 'wholesale' ? 'Wholesaler' : 'Retailer',
+                ),
+              const SizedBox(height: 16),
+              // Action Buttons Row
+              Row(
+                children: [
+                  // Call
+                  ElevatedButton.icon(
+                    onPressed: onCall,
+                    icon: const Icon(Icons.phone_rounded, size: 16),
+                    label: const Text('Call'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+                      foregroundColor: const Color(0xFF2E7D32),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // WhatsApp
+                  ElevatedButton.icon(
+                    onPressed: onWhatsApp,
+                    icon: const Icon(Icons.message_rounded, size: 16),
+                    label: const Text('WhatsApp'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366).withValues(alpha: 0.08),
+                      foregroundColor: const Color(0xFF25D366),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                  const Spacer(),
+                  // Approve Button (Green Solid)
+                  ElevatedButton.icon(
+                    onPressed: onApprove,
+                    icon: const Icon(Icons.check_circle_rounded, size: 16, color: Colors.white),
+                    label: const Text('Approve', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailItem(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 14, color: Colors.grey.shade400),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Order History Bottom Sheet
 // ---------------------------------------------------------------------------
 class _OrderHistorySheet extends StatelessWidget {
@@ -459,6 +885,10 @@ class _OrderHistorySheet extends StatelessWidget {
         return const Color(0xFF2E7D32);
       case OrderStatus.cancelled:
         return Colors.red.shade600;
+      case OrderStatus.partiallyConfirmed:
+        return const Color(0xFF0288D1);
+      case OrderStatus.partiallyDelivered:
+        return const Color(0xFF43A047);
     }
   }
 

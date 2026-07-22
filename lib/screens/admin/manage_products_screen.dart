@@ -6,6 +6,8 @@ import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/models/product.dart';
 import 'package:shantinath_agro/providers/product_provider.dart';
 import 'package:shantinath_agro/widgets/product_image.dart';
+import 'package:shantinath_agro/utils/csv_export_helper.dart';
+
 
 class ManageProductsScreen extends StatefulWidget {
   const ManageProductsScreen({super.key});
@@ -74,6 +76,11 @@ class _ManageProductsScreenState extends State<ManageProductsScreen> {
     context.read<ProductProvider>().updateProduct(updated);
   }
 
+  void _toggleVisibility(Product product) {
+    final updated = product.copyWith(isVisible: !product.isVisible);
+    context.read<ProductProvider>().updateProduct(updated);
+  }
+
   IconData _categoryIcon(String category) {
     switch (category.toLowerCase()) {
       case 'seeds':
@@ -104,10 +111,55 @@ class _ManageProductsScreenState extends State<ManageProductsScreen> {
     }
   }
 
+  Future<void> _exportProductsCsv(List<Product> products) async {
+    try {
+      final headers = [
+        'Product ID',
+        'Product Name',
+        'Marathi Name',
+        'Brand',
+        'Category',
+        'Crop Type',
+        'Pack Size',
+        'Price (INR)',
+        'In Stock',
+        'Min Order Qty',
+        'Pack Weight (kg)',
+        'Is Featured'
+      ];
+      final rows = products.map((p) => [
+        p.id,
+        p.name,
+        p.nameMr,
+        p.brand,
+        p.category,
+        p.cropType,
+        p.packSize,
+        p.price,
+        p.inStock ? 'Yes' : 'No',
+        p.minOrder,
+        p.packWeight,
+        p.isFeatured ? 'Yes' : 'No',
+      ]).toList();
+
+      final csv = CsvExportHelper.convertToCsv(headers, rows);
+      await CsvExportHelper.exportAndShareCsv(
+        fileName: 'products_list_${DateTime.now().millisecondsSinceEpoch}.csv',
+        csvContent: csv,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export CSV: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final productProvider = context.watch<ProductProvider>();
-    final products = productProvider.filteredProducts;
+    final products = productProvider.adminFilteredProducts;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
@@ -123,6 +175,14 @@ class _ManageProductsScreenState extends State<ManageProductsScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            tooltip: 'Export CSV',
+            onPressed: () => _exportProductsCsv(products),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
@@ -256,6 +316,7 @@ class _ManageProductsScreenState extends State<ManageProductsScreen> {
                         },
                         onDelete: () => _confirmDelete(context, product),
                         onToggleStock: () => _toggleStock(product),
+                        onToggleVisibility: () => _toggleVisibility(product),
                       );
                     },
                   ),
@@ -276,6 +337,7 @@ class _ProductListTile extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleStock;
+  final VoidCallback onToggleVisibility;
 
   const _ProductListTile({
     required this.product,
@@ -284,6 +346,7 @@ class _ProductListTile extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onToggleStock,
+    required this.onToggleVisibility,
   });
 
   @override
@@ -306,17 +369,19 @@ class _ProductListTile extends StatelessWidget {
           ),
           child: const Icon(Icons.delete_rounded, color: Colors.white, size: 28),
         ),
-        child: Material(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          elevation: 1,
-          shadowColor: Colors.black12,
-          child: InkWell(
-            onTap: onEdit,
+        child: Opacity(
+          opacity: product.isVisible ? 1.0 : 0.6,
+          child: Material(
+            color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+            elevation: 1,
+            shadowColor: Colors.black12,
+            child: InkWell(
+              onTap: onEdit,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
                 children: [
                   ProductImage(
                     imageUrl: product.imageUrl,
@@ -420,6 +485,16 @@ class _ProductListTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   IconButton(
+                    onPressed: onToggleVisibility,
+                    icon: Icon(
+                      product.isVisible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                      size: 20,
+                      color: product.isVisible ? const Color(0xFF2E7D32) : Colors.grey.shade400,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    tooltip: product.isVisible ? 'Hide Product' : 'Show Product',
+                  ),
+                  IconButton(
                     onPressed: onEdit,
                     icon: Icon(
                       Icons.edit_rounded,
@@ -434,6 +509,7 @@ class _ProductListTile extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 }

@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:shantinath_agro/models/product.dart';
 import 'package:shantinath_agro/providers/cart_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
-import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/widgets/product_image.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -118,7 +117,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                       content: Text(
                         localeProvider.isMarathi
                             ? 'किमान ऑर्डर ${widget.product.minOrder} नग असणे आवश्यक आहे!'
-                            : 'Minimum order must be at least ${widget.product.minOrder} units!',
+                            : 'sag must be at least ${widget.product.minOrder} units!',
                       ),
                       backgroundColor: Colors.red.shade700,
                       behavior: SnackBarBehavior.floating,
@@ -328,21 +327,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     final localeProvider = context.watch<LocaleProvider>();
     final isMarathi = localeProvider.isMarathi;
 
-    final categoryLabel = isMarathi
-        ? (AppConstants.categoriesMr[product.category] ?? product.category)
-        : product.category;
-
-    final cropLabel = isMarathi
-        ? (AppConstants.cropTypesMr[product.cropType] ?? product.cropType)
-        : product.cropType;
-
-    final cityLabel = isMarathi
-        ? 'शहर: ${product.companyCity}'
-        : 'City: ${product.companyCity}';
-
-    final minOrderLabel = isMarathi
-        ? 'किमान ऑर्डर: ${product.minOrder} नग'
-        : 'Min Order: ${product.minOrder} units';
+    final sagLabel = isMarathi
+        ? 'sag: ${product.minOrder} नग'
+        : 'sag: ${product.minOrder} units';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
@@ -351,31 +338,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
         runSpacing: 8,
         children: [
           _buildInfoChip(
-            Icons.category_rounded,
-            categoryLabel,
-            const Color(0xFF2E7D32),
-          ),
-          if (product.cropType.isNotEmpty)
-            _buildInfoChip(
-              Icons.agriculture_rounded,
-              cropLabel,
-              const Color(0xFFE65100),
-            ),
-          if (product.packSize.isNotEmpty)
-            _buildInfoChip(
-              Icons.straighten_rounded,
-              product.packSize,
-              const Color(0xFF1565C0),
-            ),
-          if (product.companyCity.isNotEmpty)
-            _buildInfoChip(
-              Icons.location_city_rounded,
-              cityLabel,
-              const Color(0xFF00796B),
-            ),
-          _buildInfoChip(
             Icons.shopping_bag_rounded,
-            minOrderLabel,
+            sagLabel,
             const Color(0xFFD84315),
           ),
         ],
@@ -410,6 +374,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   }
 
   Widget _buildPriceSection(Product product) {
+    final isMarathi = context.watch<LocaleProvider>().isMarathi;
+
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       padding: const EdgeInsets.all(20),
@@ -426,35 +392,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Price',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade500,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '₹${product.price.toStringAsFixed(0)}',
-                style: GoogleFonts.outfit(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF1B5E20),
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          if (product.packSize.isNotEmpty)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Pack Size',
+                  'Price',
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey.shade500,
@@ -462,15 +405,49 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  product.packSize,
-                  style: GoogleFonts.outfit(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '₹${product.price.toStringAsFixed(0)}',
+                    maxLines: 1,
+                    style: GoogleFonts.outfit(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1B5E20),
+                    ),
                   ),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (product.packSize.isNotEmpty)
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    isMarathi ? 'पॅकिंग आकार' : 'Pack Size',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade500,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    product.packSize,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
             ),
         ],
       ),
@@ -563,8 +540,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Container(
-      height: 80 + bottomPadding,
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + bottomPadding),
+      // No fixed height: let the bar grow with its content (e.g. scaled text)
+      // instead of clipping. Padding keeps the original comfortable size.
+      padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottomPadding),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [

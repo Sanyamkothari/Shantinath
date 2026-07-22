@@ -25,11 +25,16 @@ class AppConstants {
     'Kohinoor Seeds',
     'Pravardhan Seeds',
     'Kurnool Seeds',
-    'Palmor Seeds',
-    'Tata Rallis',
-    'Alpagari Seeds',
-    'Green Gold Seeds',
-    'Rishikesh Seeds',
+    'Palmoor Seeds',
+    'Rallies Seeds',
+    'Alpagiri Seeds',
+    'Greengold Seeds',
+    'Rushikesh Seeds',
+    'Asian Seeds',
+    'Del Super',
+    'Shiva Global',
+    'Greenfield',
+    'Maruti',
   ];
 
   // ── Categories ─────────────────────────────────────────────────────────
@@ -46,36 +51,62 @@ class AppConstants {
   // ── Crop Types ─────────────────────────────────────────────────────────
   static const List<String> cropTypes = [
     'Cotton',
+    'Soybean',
+    'Tur',
     'Wheat',
     'Rice',
     'Vegetable',
-    'Soybean',
     'Groundnut',
     'Maize',
     'Mustard',
     'Bajra',
     'Jowar',
-    'Pigeon Pea',
+    'Jawari',
+    'Chana',
+    'Tilli',
+    'Mung',
   ];
 
   static const Map<String, String> cropTypesMr = {
     'Cotton': 'कापूस',
+    'Soybean': 'सोयाबीन',
+    'Tur': 'तूर',
     'Wheat': 'गहू',
     'Rice': 'तांदूळ',
     'Vegetable': 'भाजीपाला',
-    'Soybean': 'सोयाबीन',
     'Groundnut': 'भुईमूग',
     'Maize': 'मका',
     'Mustard': 'मोहरी',
     'Bajra': 'बाजरी',
     'Jowar': 'ज्वारी',
-    'Pigeon Pea': 'तूर',
+    'Jawari': 'ज्वारी',
+    'Chana': 'चना (हरभरा)',
+    'Tilli': 'तीळ (तिळ्ळी)',
+    'Mung': 'मूग',
   };
 
   // ── Firebase Auth / OTP Config ──────────────────────────────────────────
-  static const bool useMockOtp = true; // Set to false to use real Firebase Phone Auth
+  // Defaults to REAL Firebase Phone Auth. For local development you can opt in
+  // to the mock OTP flow (code 123456) with:
+  //   flutter run --dart-define=USE_MOCK_OTP=true
+  // Never enable mock OTP in a release build.
+  static const bool useMockOtp =
+      bool.fromEnvironment('USE_MOCK_OTP', defaultValue: false);
   static const String adminPhone = '9999999999';
   static const String adminName = 'Admin';
+  static const String cloudFunctionsRegion = 'us-central1'; // Change if deploying to another region (e.g. asia-south1)
+
+  // ── Seller details (printed on delivery memos) ─────────────────────────
+  // TODO: move to an admin-editable Settings screen in Phase 2.
+  static const String sellerName = 'Shantinath Agro Agency';
+  static const String sellerAddress =
+      'Main Road, Arni, Dist. Yavatmal, Maharashtra';
+  static const String sellerPhone = '';
+  static const String sellerGstNo = '';
+  static const String sellerSeedLicence = '';
+  static const String sellerFertilizerLicence = '';
+  static const String sellerPesticideLicence = '';
+
 
   // ── Validation ─────────────────────────────────────────────────────────
   static const int phoneLength = 10;
@@ -104,4 +135,39 @@ class AppConstants {
   static const String defaultProductImage =
       'https://via.placeholder.com/300x300.png?text=Product';
   static const String currencySymbol = '₹';
+
+  // ── Brand Logo Helper ──────────────────────────────────────────────────
+  static String? getBrandLogo(String brand) {
+    switch (brand) {
+      case 'Daftari Agro':
+        return 'assets/company logos/Daftari.png';
+      case 'Kohinoor Seeds':
+        return 'assets/company logos/kohinoor.png';
+      case 'Pravardhan Seeds':
+        return 'assets/company logos/pravardhan.jpg';
+      case 'Kurnool Seeds':
+        return 'assets/company logos/kurnool.jpg';
+      case 'Palmoor Seeds':
+        return 'assets/company logos/Paplamoor.jpeg';
+      case 'Rallies Seeds':
+        return 'assets/company logos/tataRallis.avif';
+      case 'Alpagiri Seeds':
+        return 'assets/company logos/alpgiri.png';
+      case 'Greengold Seeds':
+        return 'assets/company logos/greengold.jpeg';
+      case 'Rushikesh Seeds':
+        return 'assets/company logos/Rishikesh.png';
+      case 'Del Super':
+        return 'assets/company logos/DelSuper.png';
+      case 'Shiva Global':
+        return 'assets/company logos/Shiva-global.png';
+      case 'Maruti':
+        return 'assets/company logos/Marutifertochem.jpg';
+      case 'Asian Seeds':
+        return null;
+      default:
+        return null;
+    }
+  }
 }
+

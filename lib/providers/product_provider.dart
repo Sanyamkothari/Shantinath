@@ -1,3 +1,4 @@
+import 'package:shantinath_agro/utils/error_helper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shantinath_agro/models/product.dart';
 import 'package:shantinath_agro/services/product_service.dart';
@@ -22,15 +23,23 @@ class ProductProvider extends ChangeNotifier {
   // Getters
   // ---------------------------------------------------------------------------
 
-  /// All loaded products (unfiltered).
-  List<Product> get products => List.unmodifiable(_products);
+  /// All loaded products (unfiltered, visible only).
+  List<Product> get products =>
+      _products.where((p) => p.isVisible).toList();
 
-  /// Products marked as featured.
+  /// All loaded products (unfiltered, including hidden ones for admin).
+  List<Product> get adminProducts => List.unmodifiable(_products);
+
+  /// Products marked as featured (visible only).
   List<Product> get featuredProducts =>
-      _products.where((p) => p.isFeatured).toList();
+      _products.where((p) => p.isFeatured && p.isVisible).toList();
 
-  /// Products after applying active filters and search query.
-  List<Product> get filteredProducts => List.unmodifiable(_filteredProducts);
+  /// Products after applying active filters and search query (visible only).
+  List<Product> get filteredProducts =>
+      _filteredProducts.where((p) => p.isVisible).toList();
+
+  /// Products after applying active filters and search query (including hidden ones for admin).
+  List<Product> get adminFilteredProducts => List.unmodifiable(_filteredProducts);
 
   /// Whether product data is being loaded.
   bool get isLoading => _isLoading;
@@ -57,23 +66,23 @@ class ProductProvider extends ChangeNotifier {
       _selectedCropType != null ||
       _searchQuery.isNotEmpty;
 
-  /// Unique brand names from the loaded products.
+  /// Unique brand names from the loaded products (visible only).
   List<String> get brands =>
-      _products.map((p) => p.brand).toSet().toList()..sort();
+      products.map((p) => p.brand).toSet().toList()..sort();
 
-  /// Unique category names from the loaded products.
+  /// Unique category names from the loaded products (visible only).
   List<String> get categories =>
-      _products.map((p) => p.category).toSet().toList()..sort();
+      products.map((p) => p.category).toSet().toList()..sort();
 
-  /// Unique crop type names from the loaded products.
+  /// Unique crop type names from the loaded products (visible only).
   List<String> get cropTypes =>
-      _products.map((p) => p.cropType).toSet().toList()..sort();
+      products.map((p) => p.cropType).toSet().toList()..sort();
 
-  /// Count of products currently in stock.
-  int get inStockCount => _products.where((p) => p.inStock).length;
+  /// Count of products currently in stock (visible only).
+  int get inStockCount => products.where((p) => p.inStock).length;
 
-  /// Count of products currently out of stock.
-  int get outOfStockCount => _products.where((p) => !p.inStock).length;
+  /// Count of products currently out of stock (visible only).
+  int get outOfStockCount => products.where((p) => !p.inStock).length;
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -93,7 +102,7 @@ class ProductProvider extends ChangeNotifier {
       _products = await _productService.getAllProducts();
       _applyFilters();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -158,7 +167,7 @@ class ProductProvider extends ChangeNotifier {
       await _productService.addProduct(product);
       await loadProducts();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
       _isLoading = false;
       notifyListeners();
     }
@@ -173,7 +182,7 @@ class ProductProvider extends ChangeNotifier {
       await _productService.updateProduct(product);
       await loadProducts();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
       _isLoading = false;
       notifyListeners();
     }
@@ -191,11 +200,27 @@ class ProductProvider extends ChangeNotifier {
       }
       await loadProducts();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
       _isLoading = false;
       notifyListeners();
     }
   }
+
+  /// Synchronize default local products to Firestore (admin operation).
+  Future<void> syncDefaultCatalog() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _productService.syncDefaultCatalog();
+      await loadProducts();
+    } catch (e) {
+      _errorMessage = friendlyError(e);
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
 
   // ---------------------------------------------------------------------------
   // Private helpers

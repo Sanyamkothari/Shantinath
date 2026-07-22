@@ -19,11 +19,11 @@ class LanguageToggle extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           border: Border.all(
-            color: Theme.of(context).primaryColor.withValues(alpha: 0.5),
+            color: Colors.white.withValues(alpha: 0.5),
             width: 1.5,
           ),
           borderRadius: BorderRadius.circular(20),
-          color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+          color: Colors.white.withValues(alpha: 0.1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -31,15 +31,15 @@ class LanguageToggle extends StatelessWidget {
             const Icon(
               Icons.language,
               size: 16,
-              color: Colors.green,
+              color: Colors.white,
             ),
             const SizedBox(width: 6),
             Text(
               isMarathi ? 'English' : 'मराठी',
-              style: TextStyle(
+              style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 13,
-                color: Theme.of(context).primaryColor,
+                color: Colors.white,
               ),
             ),
           ],

@@ -74,6 +74,19 @@ class WhatsAppService {
         '${i + 1}. ${item.product.name} (${item.product.packSize}) '
         'x${item.quantity} - ₹$itemTotal',
       );
+      if (item.confirmedQuantity > 0 || item.deliveredQuantity > 0) {
+        final List<String> details = [];
+        if (item.deliveredQuantity > 0) {
+          details.add('Delivered: ${item.deliveredQuantity}');
+        }
+        if (item.confirmedQuantity > 0) {
+          details.add('Confirmed: ${item.confirmedQuantity}');
+        }
+        if (item.pendingQuantity > 0) {
+          details.add('Pending: ${item.pendingQuantity}');
+        }
+        buffer.writeln('   └─ (${details.join(', ')})');
+      }
     }
 
     buffer.writeln('');
@@ -85,7 +98,7 @@ class WhatsAppService {
     }
 
     buffer.writeln('');
-    buffer.writeln('Status: ${order.status.name.toUpperCase()}');
+    buffer.writeln('Status: ${order.getStatusText().toUpperCase()}');
     buffer.writeln('---');
     buffer.writeln('शांतिनाथ एग्रो एजेंसी');
 

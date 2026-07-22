@@ -13,28 +13,16 @@ class ProductService {
   ProductService._internal();
 
   /// Returns all products from Firestore.
-  /// Seeds the Firestore database if it is empty.
+  ///
+  /// NOTE: This intentionally does NOT seed the catalog. Seeding writes to the
+  /// `products` collection, which Firestore rules restrict to admins
+  /// (`allow write: if isAdmin()`); doing it here as a side-effect of a read
+  /// would throw `permission-denied` for every customer that opens a fresh
+  /// (empty) database. The catalog is seeded explicitly by an admin via
+  /// [syncDefaultCatalog] (Admin dashboard → Sync default catalog).
   Future<List<Product>> getAllProducts() async {
     final snapshot = await _productsRef.get();
-    
-    if (snapshot.docs.isEmpty) {
-      // Seed database with sample products if completely empty
-      final samples = Product.getSampleProducts();
-      final seedBatch = _db.batch();
-      
-      for (final product in samples) {
-        final docRef = _productsRef.doc(product.id);
-        seedBatch.set(docRef, product.toJson());
-      }
-      
-      await seedBatch.commit();
-      
-      final currentSnapshot = await _productsRef.orderBy('createdAt', descending: true).get();
-      return currentSnapshot.docs
-          .map((doc) => Product.fromJson(doc.data() as Map<String, dynamic>))
-          .toList();
-    }
-    
+
     return snapshot.docs
         .map((doc) => Product.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
@@ -116,6 +104,21 @@ class ProductService {
     await _productsRef.doc(id).delete();
     return true;
   }
+
+  /// Overwrites and synchronizes all default local products to Firestore.
+  /// This ensures any changes to local catalog definitions are pushed to Firebase.
+  Future<void> syncDefaultCatalog() async {
+    final samples = Product.getSampleProducts();
+    final seedBatch = _db.batch();
+    
+    for (final product in samples) {
+      final docRef = _productsRef.doc(product.id);
+      seedBatch.set(docRef, product.toJson());
+    }
+    
+    await seedBatch.commit();
+  }
+
 
   /// Get all unique brands from Firestore.
   Future<List<String>> getUniqueBrands() async {

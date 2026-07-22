@@ -1178,6 +1178,30 @@ abstract class AppLocalizations {
   /// **'Jowar'**
   String get jowar;
 
+  /// No description provided for @chana.
+  ///
+  /// In en, this message translates to:
+  /// **'Chana'**
+  String get chana;
+
+  /// No description provided for @tilli.
+  ///
+  /// In en, this message translates to:
+  /// **'Tilli'**
+  String get tilli;
+
+  /// No description provided for @jawari.
+  ///
+  /// In en, this message translates to:
+  /// **'Jawari'**
+  String get jawari;
+
+  /// No description provided for @mung.
+  ///
+  /// In en, this message translates to:
+  /// **'Mung'**
+  String get mung;
+
   /// No description provided for @rupeeSymbol.
   ///
   /// In en, this message translates to:

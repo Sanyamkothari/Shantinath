@@ -75,7 +75,13 @@ class _LoginScreenState extends State<LoginScreen>
           ),
           builder: (_) => OtpVerificationSheet(
             phone: phone,
-            onVerify: (otp) => authProvider.verifyOtpAndLogin(phone, otp),
+            onVerify: (otp) async {
+              final ok = await authProvider.verifyOtpAndLogin(phone, otp);
+              return ok
+                  ? null
+                  : (authProvider.errorMessage ??
+                      'Incorrect OTP code. Please try again.');
+            },
             onResend: () => authProvider.sendOtp(phone),
           ),
         );

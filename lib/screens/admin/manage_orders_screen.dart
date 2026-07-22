@@ -4,9 +4,13 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 
+import 'package:shantinath_agro/models/cart_item.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
+import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/services/whatsapp_service.dart';
+import 'package:shantinath_agro/utils/csv_export_helper.dart';
+
 
 class ManageOrdersScreen extends StatefulWidget {
   const ManageOrdersScreen({super.key});
@@ -54,7 +58,13 @@ class _ManageOrdersScreenState extends State<ManageOrdersScreen>
   }
 
   void _updateStatus(String orderId, OrderStatus newStatus) {
-    context.read<OrderProvider>().updateOrderStatus(orderId, newStatus);
+    final currentUser = context.read<AuthProvider>().currentUser;
+    context.read<OrderProvider>().updateOrderStatus(
+      orderId,
+      newStatus,
+      lastModifiedById: currentUser?.phone ?? '',
+      lastModifiedByName: currentUser?.name ?? '',
+    );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Order status updated to ${newStatus.name}'),
@@ -66,7 +76,31 @@ class _ManageOrdersScreenState extends State<ManageOrdersScreen>
   }
 
   List<Order> _filteredOrders(List<Order> all, OrderStatus? status) {
-    List<Order> list = status == null ? all : all.where((o) => o.status == status).toList();
+    List<Order> list;
+    if (status == null) {
+      list = all;
+    } else if (status == OrderStatus.pending) {
+      list = all
+          .where((o) =>
+              o.status == OrderStatus.pending ||
+              o.status == OrderStatus.partiallyConfirmed ||
+              o.status == OrderStatus.partiallyDelivered)
+          .toList();
+    } else if (status == OrderStatus.confirmed) {
+      list = all
+          .where((o) =>
+              o.status == OrderStatus.confirmed ||
+              o.status == OrderStatus.partiallyConfirmed)
+          .toList();
+    } else if (status == OrderStatus.delivered) {
+      list = all
+          .where((o) =>
+              o.status == OrderStatus.delivered ||
+              o.status == OrderStatus.partiallyDelivered)
+          .toList();
+    } else {
+      list = all.where((o) => o.status == status).toList();
+    }
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       list = list.where((o) {
@@ -80,8 +114,47 @@ class _ManageOrdersScreenState extends State<ManageOrdersScreen>
     return list;
   }
 
+  Future<void> _exportCurrentTabOrders(List<Order> allOrders) async {
+    try {
+      final activeTab = _tabs[_tabController.index];
+      final filteredList = _filteredOrders(allOrders, activeTab.status);
+      
+      final headers = ['Order ID', 'Date', 'Customer Name', 'Phone Number', 'Village/City', 'Total Amount', 'Status', 'Notes', 'Item Details'];
+      final rows = filteredList.map((o) {
+        final itemDetails = o.items.map((item) => '${item.product.name} (Qty: ${item.quantity}, Confirmed: ${item.confirmedQuantity}, Delivered: ${item.deliveredQuantity})').join(' | ');
+        return [
+          o.id,
+          DateFormat('yyyy-MM-dd HH:mm').format(o.createdAt),
+          o.customerName,
+          o.customerPhone,
+          o.customerVillage,
+          o.totalAmount,
+          o.status.name,
+          o.notes,
+          itemDetails,
+        ];
+      }).toList();
+
+      final csv = CsvExportHelper.convertToCsv(headers, rows);
+      final statusName = activeTab.label.toLowerCase().replaceAll(' ', '_');
+      await CsvExportHelper.exportAndShareCsv(
+        fileName: '${statusName}_orders_list_${DateTime.now().millisecondsSinceEpoch}.csv',
+        csvContent: csv,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export CSV: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final orderProvider = context.watch<OrderProvider>();
+    final allOrders = orderProvider.orders;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
       appBar: AppBar(
@@ -93,6 +166,14 @@ class _ManageOrdersScreenState extends State<ManageOrdersScreen>
         foregroundColor: Colors.white,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            tooltip: 'Export CSV',
+            onPressed: () => _exportCurrentTabOrders(allOrders),
+          ),
+          const SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -264,6 +345,10 @@ class _OrderCardState extends State<_OrderCard>
         return const Color(0xFF2E7D32);
       case OrderStatus.cancelled:
         return Colors.red.shade600;
+      case OrderStatus.partiallyConfirmed:
+        return const Color(0xFF0288D1); // Blue-grey / Light blue
+      case OrderStatus.partiallyDelivered:
+        return const Color(0xFF43A047); // Light green
     }
   }
 
@@ -277,6 +362,10 @@ class _OrderCardState extends State<_OrderCard>
         return Icons.local_shipping_rounded;
       case OrderStatus.cancelled:
         return Icons.cancel_outlined;
+      case OrderStatus.partiallyConfirmed:
+        return Icons.verified_user_outlined;
+      case OrderStatus.partiallyDelivered:
+        return Icons.local_shipping_outlined;
     }
   }
 
@@ -339,16 +428,46 @@ class _OrderCardState extends State<_OrderCard>
                                   ),
                                 ),
                                 const SizedBox(height: 2),
-                                Text(
-                                  dateFormat.format(order.createdAt),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade500,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      dateFormat.format(order.createdAt),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade500,
+                                      ),
+                                    ),
+                                    if (order.placedByName.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      Flexible(
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 1.5,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF2E7D32).withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            'By ${order.placedByName}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF2E7D32),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ],
                             ),
                           ),
+                          const SizedBox(width: 8),
                           // Status badge
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -361,6 +480,8 @@ class _OrderCardState extends State<_OrderCard>
                             ),
                             child: Text(
                               order.status.name.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
@@ -380,19 +501,25 @@ class _OrderCardState extends State<_OrderCard>
                             label: '${order.items.length} item${order.items.length != 1 ? 's' : ''}',
                           ),
                           const SizedBox(width: 12),
-                          Flexible(
+                          Expanded(
                             child: _InfoChip(
                               icon: Icons.location_on_outlined,
                               label: order.customerVillage,
                             ),
                           ),
-                          const Spacer(),
-                          Text(
-                            '₹${order.totalAmount.toStringAsFixed(0)}',
-                            style: GoogleFonts.outfit(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF2E7D32),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '₹${order.totalAmount.toStringAsFixed(0)}',
+                                maxLines: 1,
+                                style: GoogleFonts.outfit(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF2E7D32),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -425,20 +552,57 @@ class _OrderCardState extends State<_OrderCard>
                           vertical: 6,
                         ),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2E7D32),
-                                shape: BoxShape.circle,
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6.0),
+                              child: Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF2E7D32),
+                                  shape: BoxShape.circle,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                item.product.name,
-                                style: const TextStyle(fontSize: 13),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.product.name,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  if (item.confirmedQuantity > 0 ||
+                                      item.deliveredQuantity > 0) ...[
+                                    const SizedBox(height: 4),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: [
+                                        if (item.deliveredQuantity > 0)
+                                          _smallBadge(
+                                            'Delivered: ${item.deliveredQuantity}',
+                                            const Color(0xFF2E7D32),
+                                          ),
+                                        if (item.confirmedQuantity > 0)
+                                          _smallBadge(
+                                            'Confirmed: ${item.confirmedQuantity}',
+                                            const Color(0xFF1565C0),
+                                          ),
+                                        if (item.pendingQuantity > 0)
+                                          _smallBadge(
+                                            'Pending: ${item.pendingQuantity}',
+                                            const Color(0xFFFF8F00),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                             Text(
@@ -494,10 +658,14 @@ class _OrderCardState extends State<_OrderCard>
                     ),
                   ],
 
-                  // Action buttons
+                  // Action buttons — a Wrap so they flow onto a second line on
+                  // narrow screens instead of overflowing the row.
                   Padding(
                     padding: const EdgeInsets.all(14),
-                    child: Row(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         // Call button
                         OutlinedButton.icon(
@@ -519,7 +687,6 @@ class _OrderCardState extends State<_OrderCard>
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
                         IconButton.filledTonal(
                           onPressed: () {
                             try {
@@ -540,7 +707,37 @@ class _OrderCardState extends State<_OrderCard>
                           ),
                           tooltip: 'Share on WhatsApp',
                         ),
-                        const Spacer(),
+                        if (order.status != OrderStatus.cancelled &&
+                            order.status != OrderStatus.delivered)
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) =>
+                                    ProcessQuantitiesDialog(order: order),
+                              );
+                            },
+                            icon: const Icon(Icons.playlist_add_check_rounded, size: 18),
+                            label: Text(
+                              'Confirm/Deliver',
+                              style: GoogleFonts.outfit(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1565C0),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                            ),
+                          ),
                         // Status update
                         PopupMenuButton<OrderStatus>(
                           onSelected: widget.onUpdateStatus,
@@ -627,6 +824,24 @@ class _OrderCardState extends State<_OrderCard>
       ),
     );
   }
+
+  Widget _smallBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +870,264 @@ class _InfoChip extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Process Quantities Dialog (Confirm/Deliver Specific Item Quantities)
+// ---------------------------------------------------------------------------
+class ProcessQuantitiesDialog extends StatefulWidget {
+  final Order order;
+  const ProcessQuantitiesDialog({super.key, required this.order});
+
+  @override
+  State<ProcessQuantitiesDialog> createState() => ProcessQuantitiesDialogState();
+}
+
+class ProcessQuantitiesDialogState extends State<ProcessQuantitiesDialog> {
+  late List<CartItem> _items;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.order.items.map((item) => item.copyWith()).toList();
+  }
+
+  void _save(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final orderProvider = context.read<OrderProvider>();
+    final currentUser = context.read<AuthProvider>().currentUser;
+
+    setState(() => _isSaving = true);
+    
+    final tempOrder = widget.order.copyWith(items: _items);
+    final computedStatus = tempOrder.getComputedStatus();
+
+    final success = await orderProvider.updateOrderItemsAndStatus(
+      widget.order.id,
+      _items,
+      computedStatus,
+      lastModifiedById: currentUser?.phone ?? '',
+      lastModifiedByName: currentUser?.name ?? '',
+    );
+
+    if (mounted) {
+      setState(() => _isSaving = false);
+      if (success) {
+        navigator.pop();
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Order items and status updated successfully!'),
+            backgroundColor: const Color(0xFF2E7D32),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: ${orderProvider.errorMessage ?? "Unknown error"}'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      title: Text(
+        'Confirm / Deliver Items',
+        style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ...List.generate(_items.length, (index) {
+                final item = _items[index];
+                final originalItem = widget.order.items[index];
+                
+                return Card(
+                  elevation: 0,
+                  color: const Color(0xFFF5F5F0),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.product.name,
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Total Ordered: ${item.quantity}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        const Divider(height: 16),
+                        // Confirmed quantity editor
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Confirmed (Pending Delivery):',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                  onPressed: item.confirmedQuantity > 0
+                                      ? () {
+                                          setState(() {
+                                            item.confirmedQuantity--;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                SizedBox(
+                                  width: 24,
+                                  child: Text(
+                                    '${item.confirmedQuantity}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                                  onPressed: (item.confirmedQuantity + item.deliveredQuantity) < item.quantity
+                                      ? () {
+                                          setState(() {
+                                            item.confirmedQuantity++;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        // Delivered quantity editor
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Delivered:',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                                  onPressed: item.deliveredQuantity > originalItem.deliveredQuantity
+                                      ? () {
+                                          setState(() {
+                                            item.deliveredQuantity--;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                SizedBox(
+                                  width: 24,
+                                  child: Text(
+                                    '${item.deliveredQuantity}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                                  onPressed: (item.confirmedQuantity + item.deliveredQuantity) < item.quantity
+                                      ? () {
+                                          setState(() {
+                                            item.deliveredQuantity++;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Remaining Pending:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                            Text(
+                              '${item.pendingQuantity}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: item.pendingQuantity > 0 ? const Color(0xFFFF8F00) : const Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : () => _save(context),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF2E7D32),
+            foregroundColor: Colors.white,
+          ),
+          child: _isSaving
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
+              : const Text('Save'),
         ),
       ],
     );

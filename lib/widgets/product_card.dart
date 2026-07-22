@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shantinath_agro/models/product.dart';
 import 'package:shantinath_agro/providers/cart_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
+import 'package:shantinath_agro/providers/tab_navigation_provider.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/widgets/product_image.dart';
 
@@ -155,12 +156,19 @@ class ProductCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        '₹${product.price}',
-                        style: GoogleFonts.outfit(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFF2E7D32),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '₹${product.price}',
+                            maxLines: 1,
+                            style: GoogleFonts.outfit(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF2E7D32),
+                            ),
+                          ),
                         ),
                       ),
                       if (product.inStock) ...[
@@ -181,7 +189,7 @@ class ProductCard extends StatelessWidget {
                                     label: isMarathi ? 'कार्ट' : 'Cart',
                                     textColor: Colors.greenAccent,
                                     onPressed: () {
-                                      Navigator.pushNamed(context, AppRoutes.cart);
+                                      context.read<TabNavigationProvider>().navigateToTab(context, 2);
                                     },
                                   ),
                                 ),

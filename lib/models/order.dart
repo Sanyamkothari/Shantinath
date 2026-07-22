@@ -5,7 +5,9 @@ enum OrderStatus {
   pending,
   confirmed,
   delivered,
-  cancelled;
+  cancelled,
+  partiallyConfirmed,
+  partiallyDelivered;
 
   /// User-facing English label.
   String get label {
@@ -18,22 +20,33 @@ enum OrderStatus {
         return 'Delivered';
       case OrderStatus.cancelled:
         return 'Cancelled';
+      case OrderStatus.partiallyConfirmed:
+        return 'Partially Confirmed';
+      case OrderStatus.partiallyDelivered:
+        return 'Partially Delivered';
     }
   }
 
-  /// User-facing Hindi label.
-  String get labelHi {
+  /// User-facing Marathi label (the app's secondary language is Marathi, `mr`).
+  String get labelMr {
     switch (this) {
       case OrderStatus.pending:
-        return 'लंबित';
+        return 'प्रलंबित';
       case OrderStatus.confirmed:
-        return 'पुष्टि हुई';
+        return 'पुष्टी केली';
       case OrderStatus.delivered:
-        return 'डिलीवर हो गया';
+        return 'वितरित केली';
       case OrderStatus.cancelled:
-        return 'रद्द किया गया';
+        return 'रद्द केली';
+      case OrderStatus.partiallyConfirmed:
+        return 'अंशतः पुष्टी केली';
+      case OrderStatus.partiallyDelivered:
+        return 'अंशतः वितरित केली';
     }
   }
+
+  /// Returns the label for the active locale (Marathi when [isMarathi] is true).
+  String localizedLabel(bool isMarathi) => isMarathi ? labelMr : label;
 
   /// Converts a string value to the corresponding [OrderStatus].
   static OrderStatus fromString(String value) {
@@ -56,6 +69,10 @@ class Order {
   final OrderStatus status;
   final String notes;
   final DateTime createdAt;
+  final String placedById;
+  final String placedByName;
+  final String lastModifiedById;
+  final String lastModifiedByName;
 
   const Order({
     required this.id,
@@ -68,21 +85,81 @@ class Order {
     this.status = OrderStatus.pending,
     this.notes = '',
     required this.createdAt,
+    this.placedById = '',
+    this.placedByName = '',
+    this.lastModifiedById = '',
+    this.lastModifiedByName = '',
   });
 
   /// Returns a human-readable status string in English.
   String getStatusText() => status.label;
 
-  /// Returns a human-readable status string in Hindi.
-  String getStatusTextHi() => status.labelHi;
+  /// Returns a human-readable status string in Marathi.
+  String getStatusTextMr() => status.labelMr;
 
   /// Total number of individual items (sum of all quantities).
   int get totalItemCount =>
       items.fold(0, (sum, item) => sum + item.quantity);
 
+  /// Total amount for items that have been delivered.
+  double get deliveredAmount =>
+      items.fold(0.0, (sum, item) => sum + (item.product.price * item.deliveredQuantity));
+
+  /// Total amount for items that have been confirmed.
+  double get confirmedAmount =>
+      items.fold(0.0, (sum, item) => sum + (item.product.price * item.confirmedQuantity));
+
+  /// Total amount for items that are still pending.
+  double get pendingAmount =>
+      items.fold(0.0, (sum, item) => sum + (item.product.price * item.pendingQuantity));
+
+  /// Whether the order contains any pending items/quantities.
+  bool get hasPendingItems => items.any((item) => item.pendingQuantity > 0);
+
+  /// Whether the order contains any delivered items/quantities.
+  bool get hasDeliveredItems => items.any((item) => item.deliveredQuantity > 0);
+
+  /// Whether the order contains any confirmed items/quantities.
+  bool get hasConfirmedItems => items.any((item) => item.confirmedQuantity > 0);
+
   /// Whether this order can still be cancelled.
   bool get isCancellable =>
-      status == OrderStatus.pending || status == OrderStatus.confirmed;
+      status == OrderStatus.pending ||
+      status == OrderStatus.confirmed ||
+      status == OrderStatus.partiallyConfirmed;
+
+  /// Computes the overall order status based on individual item quantities.
+  OrderStatus getComputedStatus() {
+    if (status == OrderStatus.cancelled) return OrderStatus.cancelled;
+
+    bool allDelivered = true;
+    bool anyDelivered = false;
+    bool allConfirmed = true;
+    bool anyConfirmed = false;
+
+    for (final item in items) {
+      if (item.deliveredQuantity < item.quantity) {
+        allDelivered = false;
+      }
+      if (item.deliveredQuantity > 0) {
+        anyDelivered = true;
+      }
+
+      final processedQty = item.confirmedQuantity + item.deliveredQuantity;
+      if (processedQty < item.quantity) {
+        allConfirmed = false;
+      }
+      if (item.confirmedQuantity > 0) {
+        anyConfirmed = true;
+      }
+    }
+
+    if (allDelivered) return OrderStatus.delivered;
+    if (anyDelivered) return OrderStatus.partiallyDelivered;
+    if (allConfirmed) return OrderStatus.confirmed;
+    if (anyConfirmed) return OrderStatus.partiallyConfirmed;
+    return OrderStatus.pending;
+  }
 
   /// Creates an [Order] from a JSON map.
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -99,6 +176,10 @@ class Order {
       status: OrderStatus.fromString(json['status'] as String),
       notes: json['notes'] as String? ?? '',
       createdAt: DateTime.parse(json['createdAt'] as String),
+      placedById: json['placedById'] as String? ?? '',
+      placedByName: json['placedByName'] as String? ?? '',
+      lastModifiedById: json['lastModifiedById'] as String? ?? '',
+      lastModifiedByName: json['lastModifiedByName'] as String? ?? '',
     );
   }
 
@@ -115,6 +196,10 @@ class Order {
       'status': status.name,
       'notes': notes,
       'createdAt': createdAt.toIso8601String(),
+      'placedById': placedById,
+      'placedByName': placedByName,
+      'lastModifiedById': lastModifiedById,
+      'lastModifiedByName': lastModifiedByName,
     };
   }
 
@@ -130,6 +215,10 @@ class Order {
     OrderStatus? status,
     String? notes,
     DateTime? createdAt,
+    String? placedById,
+    String? placedByName,
+    String? lastModifiedById,
+    String? lastModifiedByName,
   }) {
     return Order(
       id: id ?? this.id,
@@ -142,6 +231,10 @@ class Order {
       status: status ?? this.status,
       notes: notes ?? this.notes,
       createdAt: createdAt ?? this.createdAt,
+      placedById: placedById ?? this.placedById,
+      placedByName: placedByName ?? this.placedByName,
+      lastModifiedById: lastModifiedById ?? this.lastModifiedById,
+      lastModifiedByName: lastModifiedByName ?? this.lastModifiedByName,
     );
   }
 

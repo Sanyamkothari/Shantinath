@@ -5,6 +5,7 @@ import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
+import 'package:shantinath_agro/providers/locale_provider.dart';
 import 'package:shantinath_agro/models/user_model.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
@@ -42,6 +43,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return const Color(0xFF2E7D32);
       case OrderStatus.cancelled:
         return Colors.red.shade600;
+      case OrderStatus.partiallyConfirmed:
+        return const Color(0xFF0288D1);
+      case OrderStatus.partiallyDelivered:
+        return const Color(0xFF43A047);
     }
   }
 
@@ -55,20 +60,17 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return Icons.check_circle_rounded;
       case OrderStatus.cancelled:
         return Icons.cancel_rounded;
+      case OrderStatus.partiallyConfirmed:
+        return Icons.verified_user_rounded;
+      case OrderStatus.partiallyDelivered:
+        return Icons.local_shipping_rounded;
     }
   }
 
   String _getStatusLabel(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pending:
-        return 'Pending';
-      case OrderStatus.confirmed:
-        return 'Confirmed';
-      case OrderStatus.delivered:
-        return 'Delivered';
-      case OrderStatus.cancelled:
-        return 'Cancelled';
-    }
+    final isMarathi =
+        Provider.of<LocaleProvider>(context, listen: false).isMarathi;
+    return status.localizedLabel(isMarathi);
   }
 
   @override

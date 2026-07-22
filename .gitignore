@@ -43,3 +43,21 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets & customer PII — never commit or bundle these
+# Firebase Admin SDK private key lives only on the Tally PC.
+service-account.json
+**/service-account.json
+_private/
+*.xlsx
+*.pdf
+
+# Firebase Functions secrets (managed via Secret Manager)
+firebase_functions/.env
+firebase_functions/.env.*
+
+# Cloud Functions dependencies (installed via npm)
+firebase_functions/node_modules/
+
+# Local Claude Code settings
+.claude/settings.local.json

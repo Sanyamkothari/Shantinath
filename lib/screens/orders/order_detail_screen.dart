@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/services/whatsapp_service.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
+import 'package:shantinath_agro/providers/auth_provider.dart';
+import 'package:shantinath_agro/config/routes.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   final Order order;
@@ -22,6 +24,10 @@ class OrderDetailScreen extends StatelessWidget {
         return const Color(0xFF2E7D32);
       case OrderStatus.cancelled:
         return Colors.red.shade600;
+      case OrderStatus.partiallyConfirmed:
+        return const Color(0xFF0288D1);
+      case OrderStatus.partiallyDelivered:
+        return const Color(0xFF43A047);
     }
   }
 
@@ -35,6 +41,10 @@ class OrderDetailScreen extends StatelessWidget {
         return Icons.check_circle_rounded;
       case OrderStatus.cancelled:
         return Icons.cancel_rounded;
+      case OrderStatus.partiallyConfirmed:
+        return Icons.verified_user_rounded;
+      case OrderStatus.partiallyDelivered:
+        return Icons.local_shipping_rounded;
     }
   }
 
@@ -49,6 +59,10 @@ class OrderDetailScreen extends StatelessWidget {
           return 'वितरित केली (Delivered)';
         case OrderStatus.cancelled:
           return 'रद्द केली (Cancelled)';
+        case OrderStatus.partiallyConfirmed:
+          return 'आंशिक पुष्टी केली (Partially Confirmed)';
+        case OrderStatus.partiallyDelivered:
+          return 'आंशिक वितरित केली (Partially Delivered)';
       }
     } else {
       switch (status) {
@@ -60,6 +74,10 @@ class OrderDetailScreen extends StatelessWidget {
           return 'Delivered';
         case OrderStatus.cancelled:
           return 'Cancelled';
+        case OrderStatus.partiallyConfirmed:
+          return 'Partially Confirmed';
+        case OrderStatus.partiallyDelivered:
+          return 'Partially Delivered';
       }
     }
   }
@@ -241,6 +259,37 @@ class OrderDetailScreen extends StatelessWidget {
                                     color: Colors.grey.shade600,
                                   ),
                                 ),
+                                if (item.confirmedQuantity > 0 ||
+                                    item.deliveredQuantity > 0) ...[
+                                  const SizedBox(height: 4),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    children: [
+                                      if (item.deliveredQuantity > 0)
+                                        _buildSmallBadge(
+                                          isMarathi
+                                              ? 'वितरित: ${item.deliveredQuantity}'
+                                              : 'Delivered: ${item.deliveredQuantity}',
+                                          const Color(0xFF2E7D32),
+                                        ),
+                                      if (item.confirmedQuantity > 0)
+                                        _buildSmallBadge(
+                                          isMarathi
+                                              ? 'पुष्टी केली: ${item.confirmedQuantity}'
+                                              : 'Confirmed: ${item.confirmedQuantity}',
+                                          const Color(0xFF1565C0),
+                                        ),
+                                      if (item.pendingQuantity > 0)
+                                        _buildSmallBadge(
+                                          isMarathi
+                                              ? 'लंबित: ${item.pendingQuantity}'
+                                              : 'Pending: ${item.pendingQuantity}',
+                                          const Color(0xFFFF8F00),
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -283,6 +332,30 @@ class OrderDetailScreen extends StatelessWidget {
                       ],
                     ),
                     const Divider(height: 20),
+                  ],
+                  if (order.hasDeliveredItems) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          isMarathi ? 'वितरित मालाची किंमत' : 'Delivered Value',
+                          style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        Text(
+                          '₹${order.deliveredAmount.toStringAsFixed(0)}',
+                          style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF2E7D32),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 16),
                   ],
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -335,6 +408,41 @@ class OrderDetailScreen extends StatelessWidget {
                 ),
               ),
             ),
+
+            // Delivery memo — staff only, when the order still has items to deliver.
+            if (context.watch<AuthProvider>().can('createDeliveryMemo') &&
+                order.status != OrderStatus.cancelled &&
+                order.hasPendingItems) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pushNamed(
+                      AppRoutes.createDeliveryMemo,
+                      arguments: order,
+                    );
+                  },
+                  icon: const Icon(Icons.receipt_long_rounded,
+                      color: Color(0xFF2E7D32)),
+                  label: Text(
+                    isMarathi ? 'डिलिव्हरी मेमो तयार करा' : 'Create Delivery Memo',
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: const Color(0xFF2E7D32),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
           ],
         ),
@@ -379,6 +487,24 @@ class OrderDetailScreen extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildSmallBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
     );
   }
 }

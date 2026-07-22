@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
+import 'package:shantinath_agro/models/cart_item.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:uuid/uuid.dart';
 
@@ -58,9 +59,40 @@ class OrderService {
 
   /// Update the status of an order identified by [orderId] in Firestore.
   /// Returns the updated order.
-  Future<Order> updateOrderStatus(String orderId, OrderStatus status) async {
+  Future<Order> updateOrderStatus(
+    String orderId,
+    OrderStatus status, {
+    String lastModifiedById = '',
+    String lastModifiedByName = '',
+  }) async {
     await _ordersRef.doc(orderId).update({
       'status': status.name,
+      'lastModifiedById': lastModifiedById,
+      'lastModifiedByName': lastModifiedByName,
+    });
+
+    final updatedDoc = await _ordersRef.doc(orderId).get();
+    if (!updatedDoc.exists) {
+      throw Exception('Order with id $orderId not found');
+    }
+
+    return Order.fromJson(updatedDoc.data() as Map<String, dynamic>);
+  }
+
+  /// Update both the items list and the status of an order identified by [orderId] in Firestore.
+  /// Returns the updated order.
+  Future<Order> updateOrderItemsAndStatus(
+    String orderId,
+    List<CartItem> items,
+    OrderStatus status, {
+    String lastModifiedById = '',
+    String lastModifiedByName = '',
+  }) async {
+    await _ordersRef.doc(orderId).update({
+      'items': items.map((item) => item.toJson()).toList(),
+      'status': status.name,
+      'lastModifiedById': lastModifiedById,
+      'lastModifiedByName': lastModifiedByName,
     });
 
     final updatedDoc = await _ordersRef.doc(orderId).get();

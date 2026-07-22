@@ -190,6 +190,10 @@
   "mustard": "मोहरी",
   "bajra": "बाजरी",
   "jowar": "ज्वारी",
+  "chana": "चना (हरभरा)",
+  "tilli": "तीळ (तिळ्ळी)",
+  "jawari": "ज्वारी",
+  "mung": "मूग",
 
   "rupeeSymbol": "₹",
   "priceFormat": "₹{price}",
