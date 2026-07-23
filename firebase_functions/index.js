@@ -120,9 +120,10 @@ exports.verifyOtp = onRequest(
       const token = getMcToken();
       let mc;
       try {
-        const response = await axios.post(
+        // MessageCentral's validateOtp is a GET (send is POST). Calling it with
+        // POST returns 401 (empty body) — confirmed by MC support, ticket #20285.
+        const response = await axios.get(
           `${MC_BASE_URL}/verification/v3/validateOtp`,
-          null,
           {
             params: { verificationId, code: otp.trim() },
             headers: { authToken: token },
