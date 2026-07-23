@@ -48,7 +48,7 @@ function mcErrorMessage(code) {
  * Returns: { success: true, verificationId } — verificationId is needed to validate.
  */
 exports.sendOtp = onRequest(
-  { region: REGION, cors: true, secrets: [MC_AUTH_TOKEN] },
+  { region: REGION, cors: true, secrets: [MC_AUTH_TOKEN], invoker: 'public' },
   async (req, res) => {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
@@ -99,7 +99,7 @@ exports.sendOtp = onRequest(
  * Returns: { success: true, customToken }
  */
 exports.verifyOtp = onRequest(
-  { region: REGION, cors: true, secrets: [MC_AUTH_TOKEN] },
+  { region: REGION, cors: true, secrets: [MC_AUTH_TOKEN], invoker: 'public' },
   async (req, res) => {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
@@ -151,7 +151,12 @@ exports.verifyOtp = onRequest(
       logger.warn('OTP validation failed:', mc);
       return res.status(400).json({ error: mcErrorMessage(code) });
     } catch (error) {
-      logger.error('Error verifying OTP:', error.response ? error.response.data : error.message);
+      logger.error('Error verifying OTP:', {
+        message: error.message,
+        stack: error.stack,
+        responseStatus: error.response ? error.response.status : undefined,
+        responseData: error.response ? error.response.data : undefined,
+      });
       return res.status(500).json({ error: 'Could not verify OTP. Please try again.' });
     }
   }

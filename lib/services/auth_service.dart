@@ -58,7 +58,16 @@ class AuthService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': trimmedPhone}),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+      // Guard: Cloud Functions may return an HTML error page (e.g. 404/500)
+      // when the function is not deployed or crashes on startup.
+      final body = response.body.trim();
+      if (body.startsWith('<') || body.startsWith('<!')) {
+        onError('Server error. The OTP service is temporarily unavailable. Please try again later.');
+        return;
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
       if (response.statusCode == 200 && data['success'] == true) {
         onCodeSent(data['verificationId'].toString());
       } else {
@@ -99,7 +108,15 @@ class AuthService {
           'otp': smsCode.trim(),
         }),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+      // Guard: Cloud Functions may return an HTML error page (e.g. 404/500)
+      // when the function is not deployed or crashes on startup.
+      final body = response.body.trim();
+      if (body.startsWith('<') || body.startsWith('<!')) {
+        throw Exception('Server error. The OTP service is temporarily unavailable. Please try again later.');
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
 
       if (response.statusCode != 200 || data['success'] != true) {
         throw Exception(data['error']?.toString() ?? 'Failed to verify OTP.');
