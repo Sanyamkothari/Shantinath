@@ -13,7 +13,7 @@ class WhatsAppService {
   static Future<void> shareOrderViaWhatsApp(Order order) async {
     final message = _formatOrderMessage(order);
     final encodedMessage = Uri.encodeComponent(message);
-    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final cleanPhone = AppConstants.businessContactPhone.replaceAll('+', '').replaceAll(' ', '').trim();
     final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     final whatsappUrl =
         'https://wa.me/$formattedPhone?text=$encodedMessage';

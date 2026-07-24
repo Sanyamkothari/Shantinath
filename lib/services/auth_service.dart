@@ -151,18 +151,20 @@ class AuthService {
   static const String _placeholderAdminPhone = '9999999999';
 
   Future<UserModel> _fetchOrCreateUserSession(String phone) async {
-    // Admin check: If phone matches AppConstants.adminPhone, check Firestore or create admin profile.
+    // Admin check: if the phone is one of AppConstants.adminPhones, load or
+    // create its admin profile in Firestore.
     //
-    // Safety guard: refuse to bootstrap admin from the placeholder number in a
-    // release build. Otherwise anyone could sign in as the admin using the
-    // Firebase test-number code. Replace AppConstants.adminPhone with the
-    // owner's real mobile number before shipping.
-    if (kReleaseMode && AppConstants.adminPhone == _placeholderAdminPhone) {
+    // Safety guard: refuse to bootstrap admin from the dev placeholder number in
+    // a release build. It is not a real Indian mobile, so it can only ever be
+    // "verified" through a Firebase test number — which any user could enter.
+    final isPlaceholderInRelease =
+        kReleaseMode && phone == _placeholderAdminPhone;
+    if (isPlaceholderInRelease) {
       debugPrint(
-        'Refusing admin bootstrap: AppConstants.adminPhone is still the '
-        'placeholder $_placeholderAdminPhone. Set a real number before release.',
+        'Refusing admin bootstrap: $phone is the dev placeholder. '
+        'Use a real admin number in release.',
       );
-    } else if (phone == AppConstants.adminPhone) {
+    } else if (AppConstants.adminPhones.contains(phone)) {
       final doc = await _usersRef.doc(phone).get();
       if (!doc.exists) {
         final adminUser = UserModel(
@@ -173,12 +175,43 @@ class AuthService {
           role: UserRole.admin,
           isApproved: true,
         );
-        await _usersRef.doc(phone).set(adminUser.toJson());
+        // Self-creating an admin doc needs the isBootstrapAdmin() branch of the
+        // users create rule. Without it the profile never lands, and every
+        // later isAdmin() check in the rules fails — so say that plainly
+        // instead of surfacing a bare permission-denied.
+        try {
+          await _usersRef.doc(phone).set(adminUser.toJson());
+        } catch (e) {
+          throw Exception(
+            'Could not create the admin profile. Deploy firestore.rules '
+            '(firebase deploy --only firestore:rules) and sign in again. [$e]',
+          );
+        }
         return adminUser;
       }
       final data = doc.data() as Map<String, dynamic>;
-      // Ensure admin is marked as approved in memory even if DB doesn't have it
-      if (data['isApproved'] != true) {
+      // A designated admin number must always be an approved admin. Upgrade an
+      // existing customer/employee doc in place (e.g. a number previously used
+      // for testing) so both the app and Firestore rules see role == 'admin'.
+      //
+      // The write needs the isBootstrapAdmin() self-update path in
+      // firestore.rules. If those rules have not been deployed yet the update
+      // is denied — don't let that block the login: fall back to an in-memory
+      // admin session (the pre-existing behaviour) and log it, so the only
+      // symptom is that the upgrade retries on the next sign-in.
+      if (data['role'] != UserRole.admin.name || data['isApproved'] != true) {
+        try {
+          await _usersRef.doc(phone).update({
+            'role': UserRole.admin.name,
+            'isApproved': true,
+          });
+        } catch (e) {
+          debugPrint(
+            'Could not persist admin upgrade for $phone ($e). Deploy '
+            'firestore.rules (isBootstrapAdmin) to make this stick.',
+          );
+        }
+        data['role'] = UserRole.admin.name;
         data['isApproved'] = true;
       }
       return UserModel.fromJson(data);
@@ -345,7 +378,7 @@ class AuthService {
 
   /// Get a user by their ID. Returns null if not found.
   Future<UserModel?> getUserById(String id) async {
-    final queryId = (id == 'admin_001') ? AppConstants.adminPhone : id;
+    final queryId = (id == 'admin_001') ? AppConstants.adminPhones.first : id;
     final doc = await _usersRef.doc(queryId).get();
     if (!doc.exists) return null;
     final data = doc.data() as Map<String, dynamic>?;

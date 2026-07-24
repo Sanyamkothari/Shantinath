@@ -211,7 +211,7 @@ class _HomeTabState extends State<_HomeTab> {
   }
 
   Future<void> _launchWhatsAppSupport() async {
-    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final cleanPhone = AppConstants.businessContactPhone.replaceAll('+', '').replaceAll(' ', '').trim();
     final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     const message = "Hello Shantinath Agro Agency, I would like to place an order or make an inquiry.";
     final encodedMessage = Uri.encodeComponent(message);
@@ -639,7 +639,7 @@ class _ShopTab extends StatelessWidget {
 
 
   Future<void> _launchWhatsAppSupport(BuildContext context) async {
-    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final cleanPhone = AppConstants.businessContactPhone.replaceAll('+', '').replaceAll(' ', '').trim();
     final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     const message = "Hello Shantinath Agro Agency, I would like to place an order or make an inquiry.";
     final encodedMessage = Uri.encodeComponent(message);

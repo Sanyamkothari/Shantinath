@@ -92,7 +92,22 @@ class AppConstants {
   // Never enable mock OTP in a release build.
   static const bool useMockOtp =
       bool.fromEnvironment('USE_MOCK_OTP', defaultValue: false);
-  static const String adminPhone = '9999999999';
+  // Designated admin login numbers. On first OTP login each is auto-provisioned
+  // as an admin profile in Firestore (see AuthService._fetchOrCreateUserSession)
+  // and treated as a protected bootstrap admin by firestore.rules. Keep this list
+  // in sync with the isBootstrapAdmin() list in firestore.rules.
+  static const List<String> adminPhones = [
+    '9422167400',
+    '9422167401',
+    '9421964383',
+    '8669554684',
+  ];
+
+  // Customer-facing business contact number used for the WhatsApp "message the
+  // shop" links (home screen, whatsapp_service). Defaults to the primary admin
+  // number — change if the shop publishes a different public WhatsApp number.
+  static const String businessContactPhone = '9422167400';
+
   static const String adminName = 'Admin';
   static const String cloudFunctionsRegion = 'us-central1'; // Change if deploying to another region (e.g. asia-south1)
 

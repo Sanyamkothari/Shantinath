@@ -10,10 +10,23 @@ Uses TDL Report-based XML format for maximum compatibility across Tally versions
 """
 
 import argparse
+import hashlib
+import json
 import sys
 import re
-from datetime import datetime, timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 import requests
+
+# This script prints ✔ / ⚠️ / ❌ status markers. On Windows those encode fine to
+# a console, but when stdout is a pipe or a file (Task Scheduler, `> log.txt`)
+# Python falls back to cp1252 and every such print raises UnicodeEncodeError —
+# killing the sync mid-run. Pin stdout/stderr to UTF-8 instead.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
 
 try:
     import firebase_admin
@@ -131,7 +144,7 @@ def get_ledgers_xml(company_name=None):
             <SCROLLED>Vertical</SCROLLED>
           </PART>
           <LINE NAME="LedLine">
-            <LEFTFIELDS>LedNameF, LedParentF, LedBalF, LedPhoneF, LedGSTF</LEFTFIELDS>
+            <LEFTFIELDS>LedNameF, LedParentF, LedBalF, LedIsDrF, LedPhoneF, LedGSTF</LEFTFIELDS>
           </LINE>
           <FIELD NAME="LedNameF">
             <SET>$Name</SET>
@@ -141,6 +154,9 @@ def get_ledgers_xml(company_name=None):
           </FIELD>
           <FIELD NAME="LedBalF">
             <SET>$ClosingBalance</SET>
+          </FIELD>
+          <FIELD NAME="LedIsDrF">
+            <SET>$$IsDebit:$ClosingBalance</SET>
           </FIELD>
           <FIELD NAME="LedPhoneF">
             <SET>$LedgerMobile</SET>
@@ -326,6 +342,416 @@ def parse_voucher_report(raw):
     return by_ledger
 
 
+# ---------------------------------------------------------------------------
+# Ledger statement ("Ledger Vouchers" report) — the reliable per-party method.
+# The bulk Voucher-collection walk / Day Book (get_vouchers_xml above) returned
+# empty ledger entries on this Tally, so we instead pull one party's statement
+# at a time with the proven filter+aggregate TDL (dhananjay1405/excelkida).
+# ---------------------------------------------------------------------------
+
+def _xml_escape(s):
+    return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _parse_signed_amount(s):
+    """Parses a Tally amount string into a signed float (keeps the minus sign)."""
+    s = (s or '').strip()
+    if not s:
+        return 0.0
+    tok = s.split()[0]
+    cleaned = re.sub(r'[^0-9.\-]', '', tok)
+    if cleaned in ('', '-', '.', '-.'):
+        return 0.0
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def get_ledger_vouchers_xml(company, ledger_name, from_str, to_str):
+    """Builds the 'Ledger Vouchers' TDL (one party's statement) as an XML export.
+    FETCHes AllLedgerEntries and filters to the target ledger via $$FilterValue /
+    $$FilterAmtTotal (no <WALK>, which failed here). Per voucher it returns:
+    FldDate, FldVoucherType, FldVoucherNumber, FldLedger (first contra ledger =
+    particulars), FldAmount (signed: neg=Dr, pos=Cr) and FldIsDr ($$IsDr flag —
+    the reliable Dr/Cr source in case the amount sign is dropped in XML)."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnLedgerVch</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnLedgerVch"><FORMS>StnLVForm</FORMS></REPORT>'
+        '<FORM NAME="StnLVForm"><PARTS>StnLVPart</PARTS></FORM>'
+        '<PART NAME="StnLVPart"><LINES>StnLVLine</LINES>'
+        '<REPEAT>StnLVLine : StnLVColl</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnLVLine"><FIELDS>FldDate,FldVoucherType,FldVoucherNumber,'
+        'FldLedger,FldAmount,FldIsDr,FldNarration</FIELDS></LINE>'
+        '<FIELD NAME="FldDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="FldVoucherType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="FldVoucherNumber"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="FldLedger"><SET>$FldLedger</SET></FIELD>'
+        '<FIELD NAME="FldAmount"><SET>$FldAmount</SET></FIELD>'
+        '<FIELD NAME="FldIsDr"><SET>$$IsDr:$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount</SET></FIELD>'
+        '<FIELD NAME="FldNarration"><SET>$Narration</SET></FIELD>'
+        '<COLLECTION NAME="StnLVColl"><TYPE>Voucher</TYPE>'
+        '<FETCH>Narration,AllLedgerEntries</FETCH>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedgerNot">NOT $$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FldAmount">if $$IsDr:$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount then (-$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount) else ($$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount)</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FldLedger">$$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedgerNot</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def parse_ledger_statement(raw):
+    """Parses a 'Ledger Vouchers' XML response into a list of statement txns:
+    {date, voucherType, voucherNo, amount(magnitude), type('Dr'/'Cr'),
+    particulars, narration}. Dr/Cr is taken from the explicit FldIsDr flag,
+    falling back to the FldAmount sign."""
+    dates = re.findall(r'<FLDDATE>(.*?)</FLDDATE>', raw, re.DOTALL)
+    vtypes = re.findall(r'<FLDVOUCHERTYPE>(.*?)</FLDVOUCHERTYPE>', raw, re.DOTALL)
+    vnos = re.findall(r'<FLDVOUCHERNUMBER>(.*?)</FLDVOUCHERNUMBER>', raw, re.DOTALL)
+    parties = re.findall(r'<FLDLEDGER>(.*?)</FLDLEDGER>', raw, re.DOTALL)
+    amts = re.findall(r'<FLDAMOUNT>(.*?)</FLDAMOUNT>', raw, re.DOTALL)
+    isdrs = re.findall(r'<FLDISDR>(.*?)</FLDISDR>', raw, re.DOTALL)
+    narrs = re.findall(r'<FLDNARRATION>(.*?)</FLDNARRATION>', raw, re.DOTALL)
+
+    txns = []
+    for i in range(len(dates)):
+        signed = _parse_signed_amount(amts[i] if i < len(amts) else '')
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        if flag in ('yes', 'true', '1'):
+            typ = 'Dr'
+        elif flag in ('no', 'false', '0'):
+            typ = 'Cr'
+        else:
+            typ = 'Dr' if signed < 0 else 'Cr'
+        txns.append({
+            'date': _parse_tally_date(dates[i]),
+            'voucherType': vtypes[i].strip() if i < len(vtypes) else '',
+            'voucherNo': vnos[i].strip() if i < len(vnos) else '',
+            'amount': abs(signed),
+            'type': typ,
+            'particulars': parties[i].strip() if i < len(parties) else '',
+            'narration': narrs[i].strip() if i < len(narrs) else '',
+        })
+    return txns
+
+
+def fetch_ledger_statement(tally_url, ledger_name, from_str, to_str, company=None):
+    """Fetches ONE ledger's statement via the Ledger Vouchers report.
+    Returns [] on any error so a single bad ledger never aborts the batch."""
+    headers = {'Content-Type': 'text/xml; charset=utf-8'}
+    payload = get_ledger_vouchers_xml(company, ledger_name, from_str, to_str)
+    try:
+        response = requests.post(tally_url, data=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+    except Exception:
+        return []
+    raw = response.content.decode('utf-8', errors='ignore')
+    return parse_ledger_statement(raw)
+
+
+# ---------------------------------------------------------------------------
+# Bulk statement + invoice engine.
+# Per-party queries scan ALL vouchers each time — impractical at ~35k vouchers ×
+# ~1000 shops (it hung Tally). Instead we EXPLODE every voucher's ledger and
+# inventory entries in a few windowed passes and bucket by party in Python
+# (proven in diagnose_tally.py section 7). $PartyLedgerName is empty in the
+# exploded context, so we join inventory→customer via $MasterId + the debtor set.
+# ---------------------------------------------------------------------------
+
+def get_bulk_ledgers_xml(company, from_str, to_str):
+    """EXPLODE AllLedgerEntries of every voucher in the window (no party filter).
+    One row per ledger entry: voucher no/date/type/narration, ledger, amount,
+    Dr/Cr, and $MasterId (join key)."""
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnBulkLed</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnBulkLed"><FORMS>BLF</FORMS></REPORT>'
+        '<FORM NAME="BLF"><PARTS>BLP</PARTS></FORM>'
+        '<PART NAME="BLP"><TOPLINES>BLV</TOPLINES><REPEAT>BLV : BLC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BLV"><FIELDS>CHdr</FIELDS><EXPLODE>BLEP</EXPLODE></LINE>'
+        '<FIELD NAME="CHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="BLEP"><TOPLINES>BLE</TOPLINES><REPEAT>BLE : AllLedgerEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BLE"><FIELDS>CNo,CDate,CType,CLed,CAmt,CIsDr,CMid,CNarr</FIELDS></LINE>'
+        '<FIELD NAME="CNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="CDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="CType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="CLed"><SET>$LedgerName</SET></FIELD>'
+        '<FIELD NAME="CAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="CIsDr"><SET>$$IsDr:$Amount</SET></FIELD>'
+        '<FIELD NAME="CMid"><SET>$MasterId</SET></FIELD>'
+        '<FIELD NAME="CNarr"><SET>$Narration</SET></FIELD>'
+        '<COLLECTION NAME="BLC"><TYPE>Voucher</TYPE><FETCH>AllLedgerEntries</FETCH>'
+        '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkOpt">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def get_bulk_inventory_xml(company, from_str, to_str):
+    """EXPLODE AllInventoryEntries of every voucher in the window. One row per
+    invoice line: voucher no/date, item, billed/actual qty, rate, amount, and
+    $MasterId (join key to the ledger pass)."""
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnBulkInv</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnBulkInv"><FORMS>BIF</FORMS></REPORT>'
+        '<FORM NAME="BIF"><PARTS>BIP</PARTS></FORM>'
+        '<PART NAME="BIP"><TOPLINES>BIV</TOPLINES><REPEAT>BIV : BIC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BIV"><FIELDS>BHdr</FIELDS><EXPLODE>BIEP</EXPLODE></LINE>'
+        '<FIELD NAME="BHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="BIEP"><TOPLINES>BIE</TOPLINES><REPEAT>BIE : AllInventoryEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BIE"><FIELDS>BNo,BDate,BItem,BQty,BAQty,BRate,BAmt,BMid</FIELDS></LINE>'
+        '<FIELD NAME="BNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="BDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="BItem"><SET>$StockItemName</SET></FIELD>'
+        '<FIELD NAME="BQty"><SET>$BilledQty</SET></FIELD>'
+        '<FIELD NAME="BAQty"><SET>$ActualQty</SET></FIELD>'
+        '<FIELD NAME="BRate"><SET>$Rate</SET></FIELD>'
+        '<FIELD NAME="BAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="BMid"><SET>$MasterId</SET></FIELD>'
+        '<COLLECTION NAME="BIC"><TYPE>Voucher</TYPE><FETCH>AllInventoryEntries</FETCH>'
+        '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkOpt">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def parse_bulk_ledgers(raw):
+    """Parses the bulk ledger EXPLODE into rows:
+    {mid, voucherNo, date, voucherType, ledger, amount, type, narration}."""
+    nos = re.findall(r'<CNO>(.*?)</CNO>', raw, re.DOTALL)
+    dates = re.findall(r'<CDATE>(.*?)</CDATE>', raw, re.DOTALL)
+    types = re.findall(r'<CTYPE>(.*?)</CTYPE>', raw, re.DOTALL)
+    leds = re.findall(r'<CLED>(.*?)</CLED>', raw, re.DOTALL)
+    amts = re.findall(r'<CAMT>(.*?)</CAMT>', raw, re.DOTALL)
+    isdrs = re.findall(r'<CISDR>(.*?)</CISDR>', raw, re.DOTALL)
+    mids = re.findall(r'<CMID>(.*?)</CMID>', raw, re.DOTALL)
+    narrs = re.findall(r'<CNARR>(.*?)</CNARR>', raw, re.DOTALL)
+    rows = []
+    for i in range(len(leds)):
+        signed = _parse_signed_amount(amts[i]) if i < len(amts) else 0.0
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        typ = 'Dr' if flag in ('yes', 'true', '1') else ('Cr' if flag in ('no', 'false', '0')
+              else ('Dr' if signed < 0 else 'Cr'))
+        rows.append({
+            'mid': mids[i].strip() if i < len(mids) else '',
+            'voucherNo': nos[i].strip() if i < len(nos) else '',
+            'date': _parse_tally_date(dates[i]) if i < len(dates) else datetime.now(),
+            'voucherType': types[i].strip() if i < len(types) else '',
+            'ledger': leds[i].strip(),
+            'amount': abs(signed),
+            'type': typ,
+            'narration': narrs[i].strip() if i < len(narrs) else '',
+        })
+    return rows
+
+
+def parse_bulk_inventory(raw):
+    """Parses the bulk inventory EXPLODE into rows:
+    {mid, voucherNo, date, item, qty, unit, rate, amount}."""
+    nos = re.findall(r'<BNO>(.*?)</BNO>', raw, re.DOTALL)
+    dates = re.findall(r'<BDATE>(.*?)</BDATE>', raw, re.DOTALL)
+    items = re.findall(r'<BITEM>(.*?)</BITEM>', raw, re.DOTALL)
+    qtys = re.findall(r'<BQTY>(.*?)</BQTY>', raw, re.DOTALL)
+    aqtys = re.findall(r'<BAQTY>(.*?)</BAQTY>', raw, re.DOTALL)
+    rates = re.findall(r'<BRATE>(.*?)</BRATE>', raw, re.DOTALL)
+    amts = re.findall(r'<BAMT>(.*?)</BAMT>', raw, re.DOTALL)
+    mids = re.findall(r'<BMID>(.*?)</BMID>', raw, re.DOTALL)
+    rows = []
+    for i in range(len(items)):
+        qv, qu = parse_quantity(qtys[i]) if i < len(qtys) else (0.0, '')
+        if qv == 0 and i < len(aqtys):
+            qv2, qu2 = parse_quantity(aqtys[i])
+            qv = qv2 or qv
+            qu = qu or qu2
+        rows.append({
+            'mid': mids[i].strip() if i < len(mids) else '',
+            'voucherNo': nos[i].strip() if i < len(nos) else '',
+            'date': _parse_tally_date(dates[i]) if i < len(dates) else datetime.now(),
+            'item': items[i].strip(),
+            'qty': qv, 'unit': qu,
+            'rate': abs(_parse_signed_amount(rates[i])) if i < len(rates) else 0.0,
+            'amount': abs(_parse_signed_amount(amts[i])) if i < len(amts) else 0.0,
+        })
+    return rows
+
+
+def _date_chunks(from_date, to_date, chunk_days=90):
+    """Splits [from_date, to_date] into <=chunk_days windows so each bulk request
+    stays bounded (avoids huge single responses / Tally hangs)."""
+    chunks = []
+    cur = from_date
+    while cur <= to_date:
+        end = min(cur + timedelta(days=chunk_days - 1), to_date)
+        chunks.append((cur, end))
+        cur = end + timedelta(days=1)
+    return chunks
+
+
+def fetch_bulk_statements_invoices(tally_url, days, company, debtor_names, shop_names):
+    """ONE-pass-per-window bulk engine. Returns (statements, invoices, complete,
+    from_date, to_date):
+      statements = {ledger_name: [txn, ...]}  for every debtor with activity
+      invoices   = {shop_name:   [inv, ...]}  for every SHOP LIST shop with sales
+      complete   = True only if EVERY window fetched and the rows joined cleanly
+    Fetches ledger + inventory EXPLODE in <=90-day chunks and buckets in Python.
+
+    `complete` matters: the Firestore sync deletes docs that are absent from what
+    we hand it, so a partial result must never be treated as authoritative."""
+    headers = {'Content-Type': 'text/xml; charset=utf-8'}
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=days)
+    chunks = _date_chunks(from_date, to_date, chunk_days=90)
+
+    print(f"\nBulk-fetching vouchers {from_date:%Y-%m-%d}–{to_date:%Y-%m-%d} "
+          f"in {len(chunks)} window(s) (ledger + inventory EXPLODE)...")
+
+    led_rows, inv_rows = [], []
+    failures = []
+    for ci, (cf, ct) in enumerate(chunks, 1):
+        fs, ts = cf.strftime('%Y%m%d'), ct.strftime('%Y%m%d')
+        for label, builder, sink in (
+                ('ledgers', get_bulk_ledgers_xml, led_rows),
+                ('inventory', get_bulk_inventory_xml, inv_rows)):
+            try:
+                resp = requests.post(tally_url, data=builder(company, fs, ts),
+                                     headers=headers, timeout=300)
+                resp.raise_for_status()
+                raw = resp.content.decode('utf-8', errors='ignore')
+            except Exception as e:
+                print(f"  ⚠️  window {ci}/{len(chunks)} {label} fetch failed ({e}); skipping.")
+                failures.append(f"{fs}-{ts}/{label}")
+                continue
+            sink.extend(parse_bulk_ledgers(raw) if label == 'ledgers'
+                        else parse_bulk_inventory(raw))
+        print(f"  window {ci}/{len(chunks)} {fs}–{ts}: "
+              f"{len(led_rows)} ledger / {len(inv_rows)} inventory rows so far")
+
+    statements, invoices, joined_ok = bucket_statements_invoices(
+        led_rows, inv_rows, debtor_names, shop_names)
+    total_txns = sum(len(v) for v in statements.values())
+    total_bills = sum(len(v) for v in invoices.values())
+    print(f"  ✔ Built {total_txns} statement rows for {len(statements)} debtor(s) · "
+          f"{total_bills} invoices for {len(invoices)} shop(s).")
+
+    complete = joined_ok and not failures
+    if failures:
+        print(f"  ⚠️  {len(failures)} window fetch(es) failed: {', '.join(failures)}")
+        print("     Syncing in append-only mode — nothing will be deleted this run.")
+    return statements, invoices, complete, from_date, to_date
+
+
+def bucket_statements_invoices(led_rows, inv_rows, debtor_names, shop_names):
+    """Pure bucketing of exploded ledger + inventory rows into
+    (statements, invoices, ok). Kept separate from I/O so it can be unit-tested.
+      statements[name] = [{date, voucherType, voucherNo, amount, type,
+                           particulars, narration}, ...]  (oldest first)
+      invoices[shop]   = [{mid, voucherNo, voucherType, date, taxableValue,
+                           total, items[], ledgers[]}, ...]  (newest first)
+      ok               = False if the rows could not be joined safely"""
+    # $MasterId is the ONLY join key here — txn -> its contra ledger, and
+    # invoice -> its stock lines. Tally leaves some fields empty in the exploded
+    # context ($PartyLedgerName does exactly that), and if $MasterId is one of
+    # them every voucher collapses into a single '' bucket. The result is not an
+    # error, it is silently wrong data: every statement row gets an arbitrary
+    # unrelated ledger as its "particulars", and every shop gets one bogus
+    # invoice holding the whole window's stock lines. Refuse instead.
+    blank_mids = sum(1 for r in led_rows if not r['mid'])
+    distinct_mids = len({r['mid'] for r in led_rows if r['mid']})
+    if led_rows and (distinct_mids == 0 or blank_mids / len(led_rows) > 0.05):
+        print(f"  ❌ $MasterId missing on {blank_mids}/{len(led_rows)} ledger rows "
+              f"({distinct_mids} distinct values) — vouchers cannot be joined.")
+        print("     Skipping statements + invoices this run; existing data is left "
+              "untouched. Run 'python diagnose_tally.py --raw' to inspect the export.")
+        return {}, {}, False
+
+    by_ledger = defaultdict(list)     # ledger name -> its entries (statement source)
+    by_mid_led = defaultdict(list)    # voucher MasterId -> all its ledger entries
+    for r in led_rows:
+        by_ledger[r['ledger']].append(r)
+        by_mid_led[r['mid']].append(r)
+    by_mid_inv = defaultdict(list)    # voucher MasterId -> its inventory lines
+    for r in inv_rows:
+        by_mid_inv[r['mid']].append(r)
+
+    # --- Statements: for every debtor, its own ledger entries (particulars = the
+    # first contra ledger in the same voucher). ---
+    statements = {}
+    for name in debtor_names:
+        entries = by_ledger.get(name)
+        if not entries:
+            continue
+        txns = []
+        for e in entries:
+            contra = next((L['ledger'] for L in by_mid_led.get(e['mid'], [])
+                           if L['ledger'] != name), name)
+            txns.append({
+                'mid': e['mid'],
+                'date': e['date'],
+                'voucherType': e['voucherType'],
+                'voucherNo': e['voucherNo'],
+                'amount': e['amount'],
+                'type': e['type'],
+                'particulars': contra,
+                'narration': e['narration'],
+            })
+        txns.sort(key=lambda t: t['date'])
+        statements[name] = txns
+
+    # --- Invoices: for every SHOP LIST shop, the sales vouchers where the shop is
+    # the debtor (Dr) AND the voucher has inventory. Join line items by MasterId. ---
+    invoices = {}
+    for name in shop_names:
+        sale_mids = {e['mid'] for e in by_ledger.get(name, [])
+                     if e['type'] == 'Dr' and e['mid'] in by_mid_inv}
+        if not sale_mids:
+            continue
+        bills = []
+        for mid in sale_mids:
+            items = by_mid_inv.get(mid, [])
+            ledgers = by_mid_led.get(mid, [])
+            head = ledgers[0] if ledgers else (items[0] if items else None)
+            # Grand total = the shop's own debit in this voucher.
+            total = sum(L['amount'] for L in ledgers
+                        if L['ledger'] == name and L['type'] == 'Dr')
+            bills.append({
+                'mid': mid,
+                'voucherNo': head['voucherNo'] if head else '',
+                'voucherType': head['voucherType'] if head else '',
+                'date': head['date'] if head else datetime.now(),
+                'taxableValue': round(sum(it['amount'] for it in items), 2),
+                'total': round(total, 2),
+                'items': [{'item': it['item'], 'qty': it['qty'], 'unit': it['unit'],
+                           'rate': it['rate'], 'amount': it['amount']} for it in items],
+                'ledgers': [{'ledger': L['ledger'], 'amount': L['amount'],
+                             'type': L['type']} for L in ledgers],
+            })
+        bills.sort(key=lambda b: b['date'], reverse=True)
+        invoices[name] = bills
+
+    return statements, invoices, True
+
+
 def get_stock_items_xml(company_name=None):
     """Generates TDL XML to fetch all stock items with closing quantity/value."""
     static_vars = get_static_variables(company_name)
@@ -504,6 +930,7 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
     names = re.findall(r'<LEDNAMEF>(.*?)</LEDNAMEF>', raw)
     parents = re.findall(r'<LEDPARENTF>(.*?)</LEDPARENTF>', raw)
     balances = re.findall(r'<LEDBALF>(.*?)</LEDBALF>', raw)
+    isdrs = re.findall(r'<LEDISDRF>(.*?)</LEDISDRF>', raw)
     phones = re.findall(r'<LEDPHONEF>(.*?)</LEDPHONEF>', raw)
     gsts = re.findall(r'<LEDGSTF>(.*?)</LEDGSTF>', raw)
 
@@ -516,6 +943,7 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
         name = names[i] if i < len(names) else ""
         parent = parents[i] if i < len(parents) else ""
         bal_str = balances[i] if i < len(balances) else "0.00"
+        isdr_str = isdrs[i] if i < len(isdrs) else ""
         phone_str = phones[i] if i < len(phones) else ""
         gst_str = gsts[i] if i < len(gsts) else ""
 
@@ -523,6 +951,16 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
             continue
 
         balance, bal_type = parse_balance(bal_str)
+        # Tally exports $ClosingBalance here as an UNSIGNED magnitude (no minus,
+        # no Dr/Cr suffix), so parse_balance always guesses 'Dr' and credit
+        # balances get counted as debit. Trust Tally's explicit $$IsDebit flag
+        # (LedIsDrF) instead; fall back to the sign inference only if it's
+        # missing (older Tally / field not populated).
+        flag = isdr_str.strip().lower()
+        if flag in ('yes', 'true', '1'):
+            bal_type = 'Dr'
+        elif flag in ('no', 'false', '0'):
+            bal_type = 'Cr'
         phone_clean = sanitize_phone(phone_str)
 
         ledger = {
@@ -657,7 +1095,126 @@ def fetch_vouchers_from_tally(tally_url, days, company_name=None):
 # Firestore Sync Functions
 # ---------------------------------------------------------------------------
 
-def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_path, dry_run=False, stock_items=None):
+# ---------------------------------------------------------------------------
+# Incremental write helpers. Firestore's free tier caps writes at 20k/day, so we
+# write only docs whose content actually changed (compared by a stored content
+# hash) and delete only docs that vanished — instead of rewriting everything
+# every run. Reads (to diff) are cheaper and capped much higher.
+# ---------------------------------------------------------------------------
+
+def _doc_hash(data):
+    """Stable content hash of a doc's business fields. Server-timestamp sentinels
+    and the hash field itself are excluded so unchanged docs hash identically
+    run-to-run."""
+    skip = {'updatedAt', 'createdAt', 'lastTallySync', 'syncHash'}
+
+    def norm(v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, float):
+            return round(v, 4)
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if isinstance(v, list):
+            return [norm(x) for x in v]
+        if isinstance(v, dict):
+            return {k: norm(x) for k, x in sorted(v.items()) if k not in skip}
+        return v
+
+    payload = {k: norm(x) for k, x in sorted(data.items()) if k not in skip}
+    return hashlib.md5(
+        json.dumps(payload, sort_keys=True, default=str).encode('utf-8')).hexdigest()
+
+
+def _apply_incremental(db, coll_ref, desired, dry_run, allow_deletes=True, keep=None):
+    """Writes only new/changed docs and deletes docs no longer present.
+    `desired` = {doc_id: data} (SERVER_TIMESTAMP allowed; must NOT pre-set
+    syncHash). Returns (written, deleted, unchanged). In dry-run it still reads to
+    compute an accurate diff but writes nothing.
+
+    Deleting whatever is absent from `desired` is only correct when `desired` is
+    a COMPLETE picture of what should exist. Two knobs keep that honest:
+      allow_deletes=False  — the source fetch was partial (a window failed), so
+                             write what we have and delete nothing.
+      keep(doc_id, data)   — return True to protect a doc from deletion even
+                             though it's absent; used to scope deletes to the
+                             date window actually synced, so a short --days run
+                             cannot wipe older history."""
+    existing = {}
+    for d in coll_ref.stream():
+        existing[d.id] = d.to_dict() or {}
+
+    writes = {}
+    for doc_id, data in desired.items():
+        h = _doc_hash(data)
+        if existing.get(doc_id, {}).get('syncHash') != h:
+            writes[doc_id] = {**data, 'syncHash': h}
+    if allow_deletes:
+        deletes = [i for i, d in existing.items()
+                   if i not in desired and not (keep and keep(i, d))]
+    else:
+        deletes = []
+    written, deleted, unchanged = len(writes), len(deletes), len(desired) - len(writes)
+
+    if dry_run:
+        return written, deleted, unchanged
+
+    batch = db.batch()
+    n = 0
+    for doc_id in deletes:
+        batch.delete(coll_ref.document(doc_id))
+        n += 1
+        if n >= 400:
+            batch.commit()
+            batch = db.batch()
+            n = 0
+    for doc_id, data in writes.items():
+        batch.set(coll_ref.document(doc_id), data, merge=True)
+        n += 1
+        if n >= 400:
+            batch.commit()
+            batch = db.batch()
+            n = 0
+    if n > 0:
+        batch.commit()
+    return written, deleted, unchanged
+
+
+def _incr_label(dry_run, name, w, d, u, extra=''):
+    tag = '[Dry Run] ' if dry_run else '  ✔ '
+    verb = 'would write' if dry_run else 'written'
+    print(f"{tag}{name}: {w} {verb}, {d} deleted, {u} unchanged{extra}.")
+
+
+def _naive_utc(v):
+    """Firestore hands datetimes back tz-aware (UTC); the values we write are
+    naive. Normalise so the two can be compared."""
+    if not isinstance(v, datetime):
+        return None
+    return v.astimezone(timezone.utc).replace(tzinfo=None) if v.tzinfo else v
+
+
+def _outside_window(from_date, to_date, pad_days=2):
+    """Builds a `keep` predicate protecting docs dated outside the synced window.
+    Without it, a run with a shorter --days than the previous one deletes every
+    older row: `desired` only covers the new window, and anything absent from it
+    is treated as gone from Tally. Padded because the window is local-naive while
+    stored dates are UTC — over-keeping is the safe direction."""
+    lo = from_date - timedelta(days=pad_days)
+    hi = to_date + timedelta(days=pad_days)
+
+    def keep(_doc_id, data):
+        d = _naive_utc((data or {}).get('date'))
+        if d is None:
+            return True   # undated / unreadable row — never delete it blindly
+        return d < lo or d > hi
+
+    return keep
+
+
+def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_path,
+                      dry_run=False, stock_items=None, invoices=None,
+                      statements_complete=True, statement_window=None):
     """Matches Tally ledgers with Firestore users and updates databases."""
     print("\nConnecting to Cloud Firestore...")
     try:
@@ -674,145 +1231,180 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
     # screen. It does NOT touch the products catalog or any ordering logic.
     stock_items = stock_items or []
     print(f"\nSyncing {len(stock_items)} stock items to 'tally_stock' collection...")
-    if not dry_run and stock_items:
-        stock_ref = db.collection('tally_stock')
-        batch = db.batch()
-        batch_count = 0
+    if stock_items:
+        desired = {}
         for item in stock_items:
             doc_id = re.sub(r'[/.#$\[\]]', '_', item['name']).strip()
             if not doc_id:
                 continue
-            batch.set(stock_ref.document(doc_id), {
+            desired[doc_id] = {
                 'name': item['name'],
                 'group': item.get('group', ''),
                 'quantity': item.get('quantity', 0.0),
                 'unit': item.get('unit', ''),
                 'value': item.get('value', 0.0),
                 'updatedAt': firestore.SERVER_TIMESTAMP,
-            }, merge=True)
-            batch_count += 1
-            if batch_count >= 400:
-                batch.commit()
-                batch = db.batch()
-                batch_count = 0
-        if batch_count > 0:
-            batch.commit()
-        print(f"  ✔ Successfully synced {len(stock_items)} stock items to 'tally_stock'.")
-    elif dry_run:
-        print(f"  [Dry Run] Would sync {len(stock_items)} stock items to 'tally_stock'.")
+            }
+        w, d, u = _apply_incremental(db, db.collection('tally_stock'), desired, dry_run)
+        _incr_label(dry_run, 'tally_stock', w, d, u)
+    else:
+        print("  (No stock items from Tally — skipping, not clearing existing.)")
 
     # ----- Step 1: Sync shop ledgers to tally_parties collection for registration lookup -----
     print(f"\nSyncing {len(shop_ledgers)} shop names to 'tally_parties' lookup collection...")
-    if not dry_run:
-        parties_ref = db.collection('tally_parties')
-        batch = db.batch()
-        batch_count = 0
-
-        for ledger in shop_ledgers:
-            # Use sanitized name as document ID
-            doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
-            if not doc_id:
-                continue
-
-            doc_ref = parties_ref.document(doc_id)
-            batch.set(doc_ref, {
-                'name': ledger['name'],
-                'village': ledger['parent'],  # City/area group name
-                'phone': ledger['phone'],
-                'gstNo': ledger['gstNo'],
-                'updatedAt': firestore.SERVER_TIMESTAMP
-            }, merge=True)
-
-            batch_count += 1
-            if batch_count >= 400:
-                batch.commit()
-                batch = db.batch()
-                batch_count = 0
-
-        if batch_count > 0:
-            batch.commit()
-        print(f"  ✔ Successfully synced {len(shop_ledgers)} shop names to 'tally_parties'.")
+    desired = {}
+    for ledger in shop_ledgers:
+        doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
+        if not doc_id:
+            continue
+        desired[doc_id] = {
+            'name': ledger['name'],
+            'village': ledger['parent'],  # City/area group name
+            'phone': ledger['phone'],
+            'gstNo': ledger['gstNo'],
+            'updatedAt': firestore.SERVER_TIMESTAMP,
+        }
+    if desired:
+        w, d, u = _apply_incremental(db, db.collection('tally_parties'), desired, dry_run)
+        _incr_label(dry_run, 'tally_parties', w, d, u)
     else:
-        print(f"  [Dry Run] Would sync {len(shop_ledgers)} shop names to 'tally_parties'.")
+        print("  (No shop ledgers — skipping, not clearing existing.)")
 
-    # ----- Step 1.5: Sync ALL debtor ledgers (with balances) to 'tally_ledgers' -----
-    # This gives admins the outstanding Dr/Cr of every customer in Tally,
-    # whether or not they have registered on the app. Registered users still
-    # get their own private/financials doc (Step 3) for their in-app view.
-    print(f"\nSyncing {len(debtor_ledgers)} debtor balances to 'tally_ledgers' collection...")
-    if not dry_run:
-        ledgers_ref = db.collection('tally_ledgers')
-        batch = db.batch()
-        batch_count = 0
+    # ----- Step 1.5: Sync SHOP LIST ledgers (with balances) to 'tally_ledgers' -----
+    # The admin Ledger Book reads this collection, so it must hold ONLY the
+    # SHOP LIST sub-tree (retail shops). Syncing the whole Sundry Debtors tree
+    # here would fold DEBTORS / FARMER LIST / BOOKING balances into the totals
+    # (that is what inflated the Dr/Cr figures). Balances carry the explicit
+    # Dr/Cr flag resolved from Tally's $$IsDebit in fetch_ledgers_from_tally.
 
-        for ledger in debtor_ledgers:
-            doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
-            if not doc_id:
-                continue
+    # Correctness check: these SHOP LIST totals must equal the Debit / Credit
+    # columns of the SHOP LIST row in Tally's Group Summary (Sundry Debtors).
+    # This is the definitive proof the Dr/Cr split and scope are right — verify
+    # it (works in --dry-run too) before trusting the numbers in the app.
+    shop_dr = sum(l['outstandingBalance'] for l in shop_ledgers if l['balanceType'] == 'Dr')
+    shop_cr = sum(l['outstandingBalance'] for l in shop_ledgers if l['balanceType'] == 'Cr')
+    n_dr = sum(1 for l in shop_ledgers if l['balanceType'] == 'Dr' and l['outstandingBalance'])
+    n_cr = sum(1 for l in shop_ledgers if l['balanceType'] == 'Cr' and l['outstandingBalance'])
+    print("\n  SHOP LIST balance check (must match Tally Group Summary row):")
+    print(f"    Receivable (Dr): Rs {shop_dr:>16,.2f}  across {n_dr} ledger(s)")
+    print(f"    Payable    (Cr): Rs {shop_cr:>16,.2f}  across {n_cr} ledger(s)")
 
-            doc_ref = ledgers_ref.document(doc_id)
-            batch.set(doc_ref, {
-                'name': ledger['name'],
-                'village': ledger['parent'],  # City/area group name
-                'phone': ledger['phone'],
-                'gstNo': ledger['gstNo'],
-                'outstandingBalance': ledger['outstandingBalance'],
-                'balanceType': ledger['balanceType'],
-                'updatedAt': firestore.SERVER_TIMESTAMP,
-            }, merge=True)
-
-            batch_count += 1
-            if batch_count >= 400:
-                batch.commit()
-                batch = db.batch()
-                batch_count = 0
-
-        if batch_count > 0:
-            batch.commit()
-        print(f"  ✔ Successfully synced {len(debtor_ledgers)} balances to 'tally_ledgers'.")
+    print(f"\nSyncing {len(shop_ledgers)} SHOP LIST balances to 'tally_ledgers' collection...")
+    desired = {}
+    for ledger in shop_ledgers:
+        doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
+        if not doc_id:
+            continue
+        desired[doc_id] = {
+            'name': ledger['name'],
+            'village': ledger['parent'],  # City/area group name
+            'phone': ledger['phone'],
+            'gstNo': ledger['gstNo'],
+            'outstandingBalance': ledger['outstandingBalance'],
+            'balanceType': ledger['balanceType'],
+            'updatedAt': firestore.SERVER_TIMESTAMP,
+        }
+    if desired:
+        # The diff also deletes any doc not in the SHOP LIST set — this is what
+        # purges stale non-shop ledgers from earlier full-Sundry-Debtors syncs.
+        w, d, u = _apply_incremental(db, db.collection('tally_ledgers'), desired, dry_run)
+        _incr_label(dry_run, 'tally_ledgers', w, d, u,
+                    extra=' (deletes include stale non-shop docs)')
     else:
-        print(f"  [Dry Run] Would sync {len(debtor_ledgers)} balances to 'tally_ledgers'.")
+        print("  (No shop ledgers — skipping, not clearing existing.)")
 
-    # ----- Step 1.6: Sync account statements for ALL debtors -----
-    # Mirrors the per-user ledger_transactions write, but into
-    # tally_ledgers/{id}/transactions so the admin Ledger Book can show a full
-    # statement for EVERY customer — registered on the app or not.
-    debtors_with_txns = [l for l in debtor_ledgers if vouchers.get(l['name'])]
-    print(f"\nSyncing account statements for {len(debtors_with_txns)} debtors to 'tally_ledgers/*/transactions'...")
-    if not dry_run:
-        for ledger in debtors_with_txns:
-            doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
-            if not doc_id:
-                continue
-            ledger_vouchers = vouchers.get(ledger['name'], [])
-            txns_ref = db.collection('tally_ledgers').document(doc_id).collection('transactions')
+    # ----- Step 1.6: Sync account statements into tally_ledgers/*/transactions -----
+    # Powers the admin Ledger Book drill-down (a full statement per SHOP LIST
+    # customer, registered on the app or not). Scoped to SHOP LIST so it matches
+    # exactly the tally_ledgers docs (registered non-shop debtors still get their
+    # own users/*/ledger_transactions in Step 2).
+    #
+    # Deletes here are gated twice: `statements_complete` is False when any
+    # fetch window failed or the MasterId join was unsafe (append-only, delete
+    # nothing), and `window_keep` protects rows dated outside the range we
+    # actually fetched so a shorter --days run can't erase older history.
+    window_keep = _outside_window(*statement_window) if statement_window else None
+    if not statements_complete:
+        print("\n  ⚠️  Statement/invoice source data was incomplete — writing in "
+              "append-only mode (no deletes).")
 
-            # Replace the existing statement with the latest sync window.
-            for t_doc in txns_ref.stream():
-                t_doc.reference.delete()
+    debtors_with_txns = [l for l in shop_ledgers if vouchers.get(l['name'])]
+    print(f"\nSyncing account statements for {len(debtors_with_txns)} shops to 'tally_ledgers/*/transactions'...")
+    tw = td = tu = 0
+    for ledger in debtors_with_txns:
+        doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
+        if not doc_id:
+            continue
+        txns_ref = db.collection('tally_ledgers').document(doc_id).collection('transactions')
 
-            batch = db.batch()
-            for idx, txn in enumerate(ledger_vouchers):
-                d_id = re.sub(r'[^a-zA-Z0-9_]', '_',
-                              f"{txn['date'].strftime('%Y%m%d')}_{txn['voucherNo']}")
-                doc_ref = txns_ref.document(f"{d_id}_{idx}")
-                batch.set(doc_ref, {
-                    'date': txn['date'],
-                    'voucherType': txn['voucherType'],
-                    'voucherNo': txn['voucherNo'],
-                    'amount': txn['amount'],
-                    'type': txn['type'],
-                    'particulars': txn['particulars'],
-                    'narration': txn['narration'],
-                    'createdAt': firestore.SERVER_TIMESTAMP,
-                })
-                if (idx + 1) % 490 == 0:
-                    batch.commit()
-                    batch = db.batch()
-            batch.commit()
-        print(f"  ✔ Synced statements for {len(debtors_with_txns)} debtors.")
-    else:
-        print(f"  [Dry Run] Would sync statements for {len(debtors_with_txns)} debtors.")
+        # Deterministic, order-independent doc ids (keyed on the voucher's
+        # MasterId) so new/back-dated vouchers don't reshuffle everyone else.
+        desired = {}
+        mid_seen = {}
+        for txn in vouchers.get(ledger['name'], []):
+            mid = str(txn.get('mid') or '')
+            k = mid_seen.get(mid, 0)
+            mid_seen[mid] = k + 1
+            base = mid if mid else f"{txn['date'].strftime('%Y%m%d')}_{txn['voucherNo']}"
+            d_id = re.sub(r'[^a-zA-Z0-9_]', '_', f"{base}_{k}")
+            desired[d_id] = {
+                'date': txn['date'],
+                'voucherType': txn['voucherType'],
+                'voucherNo': txn['voucherNo'],
+                'amount': txn['amount'],
+                'type': txn['type'],
+                'particulars': txn['particulars'],
+                'narration': txn['narration'],
+                'masterId': mid,
+                'createdAt': firestore.SERVER_TIMESTAMP,
+            }
+        w, d, u = _apply_incremental(db, txns_ref, desired, dry_run,
+                                     allow_deletes=statements_complete,
+                                     keep=window_keep)
+        tw += w
+        td += d
+        tu += u
+    _incr_label(dry_run, 'statements', tw, td, tu,
+                extra=f' across {len(debtors_with_txns)} shops')
+
+    # ----- Step 1.7: Sync per-shop invoices into tally_ledgers/*/invoices -----
+    # Powers the admin Ledger Book "Bills" tab: each sales bill with its line
+    # items (item/qty/rate/amount) + full ledger breakup, so it can be viewed and
+    # sent to the shop. SHOP LIST only.
+    invoices = invoices or {}
+    shops_with_bills = [l for l in shop_ledgers if invoices.get(l['name'])]
+    total_bills = sum(len(invoices.get(l['name'], [])) for l in shops_with_bills)
+    print(f"\nSyncing {total_bills} invoices for {len(shops_with_bills)} shops to 'tally_ledgers/*/invoices'...")
+    iw = idl = iu = 0
+    for ledger in shops_with_bills:
+        doc_id = re.sub(r'[/.]', '_', ledger['name']).strip()
+        if not doc_id:
+            continue
+        inv_ref = db.collection('tally_ledgers').document(doc_id).collection('invoices')
+
+        desired = {}
+        for idx, inv in enumerate(invoices.get(ledger['name'], [])):
+            inv_id = re.sub(r'[^a-zA-Z0-9_]', '_',
+                            str(inv.get('mid') or f"{inv['voucherNo']}_{idx}"))
+            desired[inv_id] = {
+                'voucherNo': inv['voucherNo'],
+                'voucherType': inv['voucherType'],
+                'date': inv['date'],
+                'masterId': str(inv.get('mid', '')),
+                'taxableValue': inv['taxableValue'],
+                'total': inv['total'],
+                'items': inv['items'],
+                'ledgers': inv['ledgers'],
+                'createdAt': firestore.SERVER_TIMESTAMP,
+            }
+        w, d, u = _apply_incremental(db, inv_ref, desired, dry_run,
+                                     allow_deletes=statements_complete,
+                                     keep=window_keep)
+        iw += w
+        idl += d
+        iu += u
+    _incr_label(dry_run, 'invoices', iw, idl, iu,
+                extra=f' across {len(shops_with_bills)} shops')
 
     # ----- Step 2: Match Tally debtor ledgers with registered Firestore users -----
     print("\nFetching registered customers from Firestore...")
@@ -1052,8 +1644,12 @@ def main():
                         help="Tally Local HTTP URL (default: http://localhost:9000)")
     parser.add_argument("--service-account", default="service-account.json",
                         help="Path to Firebase Service Account private key JSON (default: service-account.json)")
-    parser.add_argument("--days", type=int, default=90,
-                        help="Number of days of ledger transactions statement history to sync (default: 90)")
+    parser.add_argument("--days", type=int, default=365,
+                        help="Days of statement history to sync per ledger (default: 365). "
+                             "Rows dated outside this window are left alone, so a shorter "
+                             "run tops up recent data without erasing older history.")
+    parser.add_argument("--no-statements", action="store_true",
+                        help="Skip the statement + invoice sync; sync balances/stock only")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run matching logic and fetch Tally data without writing to Firestore")
     parser.add_argument("--company", default="SHANTINATH AGRO AGENCIES ARNI 2024-2027",
@@ -1082,19 +1678,29 @@ def main():
     # 2. Fetch all ledgers from Tally and filter by group
     debtor_ledgers, shop_ledgers = fetch_ledgers_from_tally(args.tally_url, debtor_groups, shop_list_groups, company)
 
-    # 3. Transaction-statement history is intentionally DISABLED.
-    # Extracting per-voucher ledger entries from this Tally setup proved
-    # unreliable (Day Book ignores the date range; full-object exports time out
-    # and can hang Tally). Only outstanding balances are synced. To re-enable
-    # later, restore: vouchers = fetch_vouchers_from_tally(args.tally_url, args.days, company)
-    vouchers = {}
+    # 3. Bulk-fetch statements + invoices in a few windowed EXPLODE passes and
+    # bucket by party in Python (scales to ~35k vouchers; per-party scanning did
+    # not). Statements go to all debtors; invoices only to SHOP LIST shops.
+    if args.no_statements:
+        print("\nSkipping statement + invoice sync (--no-statements). Balances only.")
+        vouchers, invoices = {}, {}
+        statements_complete, statement_window = True, None
+    else:
+        debtor_names = {l['name'] for l in debtor_ledgers}
+        shop_names = {l['name'] for l in shop_ledgers}
+        (vouchers, invoices, statements_complete,
+         stmt_from, stmt_to) = fetch_bulk_statements_invoices(
+            args.tally_url, args.days, company, debtor_names, shop_names)
+        statement_window = (stmt_from, stmt_to)
 
     # 4. Fetch stock items (for the admin Stock Status view)
     stock_items = fetch_stock_items_from_tally(args.tally_url, company)
 
     # 5. Sync to Firebase
     sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, args.service_account,
-                      dry_run=args.dry_run, stock_items=stock_items)
+                      dry_run=args.dry_run, stock_items=stock_items, invoices=invoices,
+                      statements_complete=statements_complete,
+                      statement_window=statement_window)
 
 
 if __name__ == "__main__":

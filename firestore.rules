@@ -31,6 +31,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(phone10())).data.role == 'admin';
     }
 
+    // Designated bootstrap admin numbers — must mirror AppConstants.adminPhones.
+    // These may self-provision their own admin profile on first login and are
+    // protected from deletion / privileged edits by other users.
+    function isBootstrapAdmin(phoneId) {
+      return phoneId in ['9422167400', '9422167401', '9421964383', '8669554684'];
+    }
+
     // Gets the user data document for the current user
     function me() {
       return get(/databases/$(database)/documents/users/$(phone10())).data;
@@ -63,7 +70,7 @@ service cloud.firestore {
       // Admins and staff with manageEmployees permission can create employee docs (as long as they don't assign 'admin' role).
       allow create: if isAuthenticated() && (
         (isOwner(phoneId) && (
-          phoneId == '9999999999' ||
+          isBootstrapAdmin(phoneId) ||
           (request.resource.data.get('role', 'customer') == 'customer' &&
            request.resource.data.get('isApproved', false) == false &&
            request.resource.data.get('permissions', []) == [])
@@ -76,8 +83,8 @@ service cloud.firestore {
       // Bootstrap admin is fully protected and can only be updated/deleted by themselves.
       // Admins and managePermissions/manageEmployees holders can edit users (if not elevating to or modifying admins).
       allow update: if isAuthenticated() && (
-        (phoneId == '9999999999' && phone10() == '9999999999') ||
-        (phoneId != '9999999999' && (
+        (isBootstrapAdmin(phoneId) && phone10() == phoneId) ||
+        (!isBootstrapAdmin(phoneId) && (
           (isOwner(phoneId) && privilegedFieldsUnchanged()) ||
           isAdmin() ||
           hasPerm('managePermissions') ||
@@ -86,7 +93,7 @@ service cloud.firestore {
       );
 
       // Only an admin (or someone with manageEmployees) may delete a user profile (except the bootstrap admin).
-      allow delete: if phoneId != '9999999999' && (isAdmin() || hasPerm('manageEmployees'));
+      allow delete: if !isBootstrapAdmin(phoneId) && (isAdmin() || hasPerm('manageEmployees'));
     }
 
     // Private financials subcollection
@@ -114,6 +121,24 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Per-ledger account statement (written by the Tally Admin SDK sync).
+    // Powers the admin Ledger Book drill-down. The parent tally_ledgers rule
+    // does NOT cover this subcollection (rules aren't recursive), so it needs
+    // its own match or it defaults to deny.
+    match /tally_ledgers/{ledgerId}/transactions/{txnId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Per-shop invoices (written by the Tally Admin SDK sync). Powers the admin
+    // Ledger Book "Bills" tab. Same access as the parent balances/statements.
+    match /tally_ledgers/{ledgerId}/invoices/{invId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
     // Per-user ledger transactions (written by the Tally Admin SDK sync).
     match /users/{phoneId}/ledger_transactions/{txnId} {
       allow read: if isAuthenticated() && (isOwner(phoneId) || isAdmin() || hasPerm('viewCustomerBalances'));
@@ -125,6 +150,19 @@ service cloud.firestore {
     match /tally_stock/{itemId} {
       allow read: if isAuthenticated() && (isAdmin() || hasPerm('manageProducts'));
       allow write: if false;
+    }
+
+    // OTP verification sessions (verificationId -> phone binding) and the OTP
+    // send rate-limit counters. Written only by the sendOtp/verifyOtp Cloud
+    // Functions via the Admin SDK, which bypasses these rules. Readable by a
+    // client they must never be: the session doc is what stops one user from
+    // redeeming another user's verificationId.
+    match /otp_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /otp_rate_limits/{bucketId} {
+      allow read, write: if false;
     }
 
     // Products Collection

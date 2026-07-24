@@ -164,10 +164,11 @@ def explore_ledgers(requests, url, company, groups):
     hr("2. LEDGER STRUCTURE (customers / balances)")
     raw = tally_request(requests, url, get_ledgers_xml(company))
     if not raw:
-        return set()
+        return set(), []
     names = findall('LEDNAMEF', raw)
     parents = findall('LEDPARENTF', raw)
     bals = findall('LEDBALF', raw)
+    isdrs = findall('LEDISDRF', raw)
     phones = findall('LEDPHONEF', raw)
     gsts = findall('LEDGSTF', raw)
     print(f"✔ Found {len(names)} total ledgers.")
@@ -186,6 +187,7 @@ def explore_ledgers(requests, url, company, groups):
             'name': names[i].strip(),
             'parent': parent,
             'bal_raw': bals[i].strip() if i < len(bals) else '',
+            'isdr_raw': isdrs[i].strip() if i < len(isdrs) else '',
             'phone_raw': phones[i].strip() if i < len(phones) else '',
             'gst': gsts[i].strip() if i < len(gsts) else '',
         })
@@ -195,7 +197,7 @@ def explore_ledgers(requests, url, company, groups):
 
     if not debtors:
         print("  ⚠️  No debtor ledgers to analyse.")
-        return set()
+        return set(), []
 
     # Match readiness
     has_phone = sum(1 for d in debtors if sanitize_phone(d['phone_raw']))
@@ -211,6 +213,26 @@ def explore_ledgers(requests, url, company, groups):
         print(f"    • {d['name'][:34]:34s} | bal {d['bal_raw']!r:>18} → {amt:>12,.2f} {typ}")
         print(f"      phone {d['phone_raw']!r} → {ph or '—'} | gst {d['gst'] or '—'}")
 
+    # Dr/Cr flag check — the sync now trusts Tally's $$IsDebit ($ClosingBalance
+    # exports as an unsigned magnitude, so parse_balance alone can't tell Dr
+    # from Cr). This section proves the flag is populated AND actually finds
+    # credit ledgers. If it shows "0 Cr", $$IsDebit did NOT work on this Tally
+    # and credit balances would still be mislabelled — tell your developer.
+    flagged = [d for d in debtors if d['isdr_raw']]
+    cr = [d for d in debtors if d['isdr_raw'].strip().lower() in ('no', 'false', '0')]
+    print(f"\n  Dr/Cr flag ($$IsDebit) check: {len(flagged)}/{len(debtors)} ledgers "
+          f"returned a flag · {len(debtors) - len(cr)} Dr / {len(cr)} Cr")
+    if not flagged:
+        print("    ❌ No $$IsDebit flag came back — this Tally build may not support it.")
+        print("       Credit balances will fall back to the (wrong) 'Dr' default.")
+    elif not cr:
+        print("    ⚠️  Flag populated but found ZERO credit ledgers — verify against Tally's")
+        print("       Group Summary (Sundry Debtors should show a Credit column total).")
+    else:
+        print("    Sample CREDIT ledgers correctly detected:")
+        for d in cr[:4]:
+            print(f"      (Cr) {d['name'][:34]:34s} | bal {d['bal_raw']!r}")
+
     # Flag odd balance strings the parser may not expect
     odd = [d for d in debtors if d['bal_raw'] and not re.match(
         r'^-?[\d,]+(\.\d+)?\s*(Dr|Cr)?$', d['bal_raw'], re.IGNORECASE)]
@@ -219,7 +241,16 @@ def explore_ledgers(requests, url, company, groups):
         for d in odd[:3]:
             print(f"     '{d['name']}': {d['bal_raw']!r}")
 
-    return {d['name'] for d in debtors}
+    # Candidate ledgers most likely to have transactions (non-zero balance,
+    # prefer those with a phone), used by the Ledger Statement probe below.
+    def _bal_val(d):
+        amt, _ = parse_balance(d['bal_raw'])
+        return amt
+    active = [d for d in debtors if _bal_val(d) > 0]
+    active.sort(key=lambda d: (0 if sanitize_phone(d['phone_raw']) else 1, -_bal_val(d)))
+    candidates = [d['name'] for d in active[:10]] or [d['name'] for d in debtors[:10]]
+
+    return {d['name'] for d in debtors}, candidates
 
 
 def explore_stock(requests, url, company, raw_dump=False):
@@ -548,6 +579,669 @@ def check_firebase():
         print(f"  • registered customers: could not read ({e}).")
 
 
+def _xml_escape(s):
+    return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _ledger_vouchers_xml(company, ledger_name, from_str, to_str):
+    """Proven 'Ledger Vouchers' TDL (a single party's statement), adapted to XML
+    export. Unlike a raw <WALK>AllLedgerEntries> (which returned empty ledger /
+    amount fields on this setup), this FETCHes the ledger entries and uses
+    $$FilterValue / $$FilterAmtTotal to pick out just the target ledger — the
+    reliable pattern from the excelkida/dhananjay1405 query.
+
+    Fields per voucher: FldDate, FldVoucherType, FldVoucherNumber,
+    FldLedger (the contra/opposite ledger = 'particulars'), FldAmount
+    (signed: negative=Dr, positive=Cr — IF the sign survives XML export) and
+    FldIsDr (explicit $$IsDr flag, our reliable Dr/Cr source)."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnLedgerVch</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnLedgerVch"><FORMS>StnLVForm</FORMS></REPORT>'
+        '<FORM NAME="StnLVForm"><PARTS>StnLVPart</PARTS></FORM>'
+        '<PART NAME="StnLVPart"><LINES>StnLVLine</LINES>'
+        '<REPEAT>StnLVLine : StnLVColl</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnLVLine"><FIELDS>FldDate,FldVoucherType,FldVoucherNumber,'
+        'FldLedger,FldAmount,FldIsDr,FldNarration</FIELDS></LINE>'
+        '<FIELD NAME="FldDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="FldVoucherType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="FldVoucherNumber"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="FldLedger"><SET>$FldLedger</SET></FIELD>'
+        '<FIELD NAME="FldAmount"><SET>$FldAmount</SET></FIELD>'
+        '<FIELD NAME="FldIsDr"><SET>$$IsDr:$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount</SET></FIELD>'
+        '<FIELD NAME="FldNarration"><SET>$Narration</SET></FIELD>'
+        '<COLLECTION NAME="StnLVColl"><TYPE>Voucher</TYPE>'
+        '<FETCH>Narration,AllLedgerEntries</FETCH>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedgerNot">NOT $$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FldAmount">if $$IsDr:$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount then (-$$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount) else ($$FilterAmtTotal:AllLedgerEntries:FilterVchLedger:$Amount)</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FldLedger">$$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedgerNot</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _parse_signed_amount(s):
+    """Parses a Tally amount string into a signed float (keeps the minus sign)."""
+    s = (s or '').strip()
+    if not s:
+        return 0.0
+    tok = s.split()[0]
+    cleaned = re.sub(r'[^0-9.\-]', '', tok)
+    if cleaned in ('', '-', '.', '-.'):
+        return 0.0
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def _parse_ledger_vouchers(raw):
+    """Parses the Ledger Vouchers XML response into statement rows. Dr/Cr comes
+    from the explicit FldIsDr ($$IsDr) flag; the FldAmount sign is kept only as
+    a cross-check (it may not survive XML export)."""
+    dates = findall('FLDDATE', raw)
+    vtypes = findall('FLDVOUCHERTYPE', raw)
+    vnos = findall('FLDVOUCHERNUMBER', raw)
+    parties = findall('FLDLEDGER', raw)
+    amts = findall('FLDAMOUNT', raw)
+    isdrs = findall('FLDISDR', raw)
+    narrs = findall('FLDNARRATION', raw)
+    rows = []
+    for i in range(len(dates)):
+        signed = _parse_signed_amount(amts[i] if i < len(amts) else '')
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        if flag in ('yes', 'true', '1'):
+            typ = 'Dr'
+        elif flag in ('no', 'false', '0'):
+            typ = 'Cr'
+        else:
+            typ = 'Dr' if signed < 0 else 'Cr'  # fall back to the amount sign
+        rows.append({
+            'date': dates[i].strip(),
+            'vtype': vtypes[i].strip() if i < len(vtypes) else '',
+            'vno': vnos[i].strip() if i < len(vnos) else '',
+            'party': parties[i].strip() if i < len(parties) else '',
+            'amount': abs(signed),
+            'signed': signed,
+            'flag': flag,
+            'type': typ,
+            'narration': narrs[i].strip() if i < len(narrs) else '',
+        })
+    return rows
+
+
+def probe_ledger_statement(requests, url, company, candidates, chosen='', raw_dump=False):
+    hr("5. LEDGER STATEMENT PROBE (Ledger Vouchers report)")
+    print("Tests the proven per-party 'Ledger Vouchers' TDL — the correct source")
+    print("for the app's Account Statement (customer list + admin drill-down).")
+
+    targets = ([chosen] if chosen else []) + [c for c in candidates if c != chosen]
+    if not targets:
+        print('  ⚠️  No candidate ledger to test. Pass one with --ledger "NAME".')
+        return
+
+    frm, to = "20240401", "20270331"   # whole 2024-2027 company period
+    tried = 0
+    for name in targets:
+        if tried >= 6:
+            break
+        tried += 1
+        raw = tally_request(requests, url, _ledger_vouchers_xml(company, name, frm, to))
+        if not raw:
+            print(f"  • {name[:42]:42s} → request failed / empty")
+            continue
+        if raw_dump:
+            print(f"  [raw head for '{name}'] {raw[:600]!r}\n")
+        rows = _parse_ledger_vouchers(raw)
+        if not rows:
+            print(f"  • {name[:42]:42s} → 0 vouchers")
+            continue
+
+        dr = sum(r['amount'] for r in rows if r['type'] == 'Dr')
+        cr = sum(r['amount'] for r in rows if r['type'] == 'Cr')
+        n_dr = sum(1 for r in rows if r['type'] == 'Dr')
+        n_cr = sum(1 for r in rows if r['type'] == 'Cr')
+        sign_kept = any(r['signed'] < 0 for r in rows)
+        flagged = sum(1 for r in rows if r['flag'])
+
+        print(f"\n  ✔ '{name}' → {len(rows)} voucher(s) in {frm}–{to}")
+        print(f"    Totals: Dr Rs {dr:,.2f} ({n_dr}) · Cr Rs {cr:,.2f} ({n_cr})")
+        print(f"    FldIsDr flag returned on {flagged}/{len(rows)} rows "
+              f"(this is what we'll trust for Dr/Cr).")
+        print(f"    FldAmount sign survived XML export: "
+              f"{'YES' if sign_kept else 'NO — good thing we added the $$IsDr flag'}")
+        print("\n    First 8 rows (date | type #no | particulars | amount):")
+        for r in rows[:8]:
+            print(f"      {r['date']:>11} | {r['vtype'][:16]:16s} #{r['vno'][:8]:8s} | "
+                  f"{r['party'][:22]:22s} | Rs {r['amount']:>13,.2f} {r['type']}")
+            if r['narration']:
+                print(f"          note: {r['narration'][:60]}")
+        print("\n  → If these rows match this party's statement in Tally (Display →")
+        print("    Account Books → Ledger), this is the method to wire into the sync.")
+        return
+
+    print(f"\n  ⚠️  Tried {tried} ledger(s); none returned vouchers in {frm}–{to}.")
+    print("     Pick a party you KNOW has transactions and re-run, e.g.:")
+    print('       python diagnose_tally.py --ledger "AAI KRISHI KENDRA MANGRUL"')
+
+
+def _walk_inventory_xml(company, ledger_name, from_str, to_str):
+    """Walks AllInventoryEntries of the party's vouchers (tally-database-loader
+    pattern: TYPE Voucher + FETCH + WALK — the FETCH is what our old attempt
+    lacked). One row per invoice line: voucher date/no/type + item/qty/rate/amt."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnInv</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnInv"><FORMS>StnInvForm</FORMS></REPORT>'
+        '<FORM NAME="StnInvForm"><PARTS>StnInvPart</PARTS></FORM>'
+        '<PART NAME="StnInvPart"><LINES>StnInvLine</LINES>'
+        '<REPEAT>StnInvLine : StnInvColl</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnInvLine"><FIELDS>InvDate,InvNo,InvType,InvItem,InvQty,InvRate,InvAmt</FIELDS></LINE>'
+        '<FIELD NAME="InvDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="InvNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="InvType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="InvItem"><SET>$StockItemName</SET></FIELD>'
+        '<FIELD NAME="InvQty"><SET>$ActualQty</SET></FIELD>'
+        '<FIELD NAME="InvRate"><SET>$Rate</SET></FIELD>'
+        '<FIELD NAME="InvAmt"><SET>$Amount</SET></FIELD>'
+        '<COLLECTION NAME="StnInvColl"><TYPE>Voucher</TYPE>'
+        '<FETCH>AllInventoryEntries,AllLedgerEntries</FETCH>'
+        '<WALK>AllInventoryEntries</WALK>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _walk_ledgers_xml(company, ledger_name, from_str, to_str):
+    """Walks AllLedgerEntries of the party's vouchers — gives the full ledger
+    breakup per voucher (party + sales ledger + CGST/SGST tax ledgers)."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnLed</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnLed"><FORMS>StnLedForm</FORMS></REPORT>'
+        '<FORM NAME="StnLedForm"><PARTS>StnLedPart</PARTS></FORM>'
+        '<PART NAME="StnLedPart"><LINES>StnLedLine</LINES>'
+        '<REPEAT>StnLedLine : StnLedColl</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnLedLine"><FIELDS>LedDate,LedNo,LedType,LedName,LedAmt,LedIsDr</FIELDS></LINE>'
+        '<FIELD NAME="LedDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="LedNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="LedType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="LedName"><SET>$LedgerName</SET></FIELD>'
+        '<FIELD NAME="LedAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="LedIsDr"><SET>$$IsDr:$Amount</SET></FIELD>'
+        '<COLLECTION NAME="StnLedColl"><TYPE>Voucher</TYPE>'
+        '<FETCH>AllLedgerEntries</FETCH>'
+        '<WALK>AllLedgerEntries</WALK>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _parse_inventory_walk(raw):
+    dates = findall('INVDATE', raw)
+    nos = findall('INVNO', raw)
+    types = findall('INVTYPE', raw)
+    items = findall('INVITEM', raw)
+    qtys = findall('INVQTY', raw)
+    rates = findall('INVRATE', raw)
+    amts = findall('INVAMT', raw)
+    rows = []
+    for i in range(len(items)):
+        qv, qu = parse_quantity(qtys[i]) if i < len(qtys) else (0.0, '')
+        rows.append({
+            'date': dates[i].strip() if i < len(dates) else '',
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'vtype': types[i].strip() if i < len(types) else '',
+            'item': items[i].strip(),
+            'qty': qv, 'unit': qu,
+            'rate': abs(_parse_signed_amount(rates[i])) if i < len(rates) else 0.0,
+            'amount': abs(_parse_signed_amount(amts[i])) if i < len(amts) else 0.0,
+        })
+    return rows
+
+
+def _parse_ledger_walk(raw):
+    nos = findall('LEDNO', raw)
+    names = findall('LEDNAME', raw)
+    amts = findall('LEDAMT', raw)
+    isdrs = findall('LEDISDR', raw)
+    rows = []
+    for i in range(len(names)):
+        signed = _parse_signed_amount(amts[i]) if i < len(amts) else 0.0
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        if flag in ('yes', 'true', '1'):
+            typ = 'Dr'
+        elif flag in ('no', 'false', '0'):
+            typ = 'Cr'
+        else:
+            typ = 'Dr' if signed < 0 else 'Cr'
+        rows.append({
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'ledger': names[i].strip(),
+            'amount': abs(signed),
+            'type': typ,
+        })
+    return rows
+
+
+def _explode_inventory_xml(company, ledger_name, from_str, to_str):
+    """EXPLODE pattern: outer voucher line explodes a sub-part that REPEATs over
+    AllInventoryEntries — the classic invoice-print construct. Each item line
+    carries its parent voucher number ($VoucherNumber) so we can regroup."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnInvX</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnInvX"><FORMS>StnInvXF</FORMS></REPORT>'
+        '<FORM NAME="StnInvXF"><PARTS>StnInvXP</PARTS></FORM>'
+        '<PART NAME="StnInvXP"><TOPLINES>StnInvXV</TOPLINES>'
+        '<REPEAT>StnInvXV : StnInvXC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnInvXV"><FIELDS>XVHdr</FIELDS><EXPLODE>StnInvXIP</EXPLODE></LINE>'
+        '<FIELD NAME="XVHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="StnInvXIP"><TOPLINES>StnInvXI</TOPLINES>'
+        '<REPEAT>StnInvXI : AllInventoryEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnInvXI"><FIELDS>XINo,XItem,XQty,XBQty,XRate,XAmt</FIELDS></LINE>'
+        '<FIELD NAME="XINo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="XItem"><SET>$StockItemName</SET></FIELD>'
+        '<FIELD NAME="XQty"><SET>$ActualQty</SET></FIELD>'
+        '<FIELD NAME="XBQty"><SET>$BilledQty</SET></FIELD>'
+        '<FIELD NAME="XRate"><SET>$Rate</SET></FIELD>'
+        '<FIELD NAME="XAmt"><SET>$Amount</SET></FIELD>'
+        '<COLLECTION NAME="StnInvXC"><TYPE>Voucher</TYPE>'
+        '<FETCH>AllInventoryEntries,AllLedgerEntries</FETCH>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _explode_ledgers_xml(company, ledger_name, from_str, to_str):
+    """EXPLODE over AllLedgerEntries — full ledger breakup per voucher (party +
+    sales ledger + CGST/SGST tax ledgers), each row tagged with its voucher no."""
+    led = _xml_escape(ledger_name)
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnLedX</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnLedX"><FORMS>StnLedXF</FORMS></REPORT>'
+        '<FORM NAME="StnLedXF"><PARTS>StnLedXP</PARTS></FORM>'
+        '<PART NAME="StnLedXP"><TOPLINES>StnLedXV</TOPLINES>'
+        '<REPEAT>StnLedXV : StnLedXC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnLedXV"><FIELDS>YVHdr</FIELDS><EXPLODE>StnLedXEP</EXPLODE></LINE>'
+        '<FIELD NAME="YVHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="StnLedXEP"><TOPLINES>StnLedXE</TOPLINES>'
+        '<REPEAT>StnLedXE : AllLedgerEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="StnLedXE"><FIELDS>YINo,YLed,YAmt,YIsDr</FIELDS></LINE>'
+        '<FIELD NAME="YINo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="YLed"><SET>$LedgerName</SET></FIELD>'
+        '<FIELD NAME="YAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="YIsDr"><SET>$$IsDr:$Amount</SET></FIELD>'
+        '<COLLECTION NAME="StnLedXC"><TYPE>Voucher</TYPE>'
+        '<FETCH>AllLedgerEntries</FETCH>'
+        '<FILTER>FilterCancelledVouchers,FilterOptionalVouchers,FilterVch</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterVch">NOT $$IsEmpty:($$FilterValue:$LedgerName:AllLedgerEntries:First:FilterVchLedger)</SYSTEM>'
+        f'<SYSTEM TYPE="Formulae" NAME="FilterVchLedger">$$IsEqual:$LedgerName:"{led}"</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterCancelledVouchers">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FilterOptionalVouchers">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _parse_explode_inventory(raw):
+    nos = findall('XINO', raw)
+    items = findall('XITEM', raw)
+    qtys = findall('XQTY', raw)
+    bqtys = findall('XBQTY', raw)
+    rates = findall('XRATE', raw)
+    amts = findall('XAMT', raw)
+    rows = []
+    for i in range(len(items)):
+        qv, qu = parse_quantity(qtys[i]) if i < len(qtys) else (0.0, '')
+        if qv == 0 and i < len(bqtys):
+            qv, qu2 = parse_quantity(bqtys[i])
+            qu = qu or qu2
+        rows.append({
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'item': items[i].strip(),
+            'qty': qv, 'unit': qu,
+            'rate': abs(_parse_signed_amount(rates[i])) if i < len(rates) else 0.0,
+            'amount': abs(_parse_signed_amount(amts[i])) if i < len(amts) else 0.0,
+        })
+    return rows
+
+
+def _parse_explode_ledgers(raw):
+    nos = findall('YINO', raw)
+    leds = findall('YLED', raw)
+    amts = findall('YAMT', raw)
+    isdrs = findall('YISDR', raw)
+    rows = []
+    for i in range(len(leds)):
+        signed = _parse_signed_amount(amts[i]) if i < len(amts) else 0.0
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        if flag in ('yes', 'true', '1'):
+            typ = 'Dr'
+        elif flag in ('no', 'false', '0'):
+            typ = 'Cr'
+        else:
+            typ = 'Dr' if signed < 0 else 'Cr'
+        rows.append({
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'ledger': leds[i].strip(),
+            'amount': abs(signed),
+            'type': typ,
+        })
+    return rows
+
+
+def probe_invoice(requests, url, company, candidates, chosen='', raw_dump=False):
+    hr("6. INVOICE / BILL EXTRACTION PROBE (line items + tax)")
+    print("Tests two ways to pull invoice line items — WALK vs nested EXPLODE —")
+    print("and reports which returns real qty + rate + tax (for the 'Bills' tab).")
+
+    targets = ([chosen] if chosen else []) + [c for c in candidates if c != chosen]
+    if not targets:
+        print('  ⚠️  No candidate ledger. Pass one with --ledger "NAME".')
+        return
+
+    frm, to = "20240401", "20270331"
+    for name in targets[:6]:
+        st_raw = tally_request(requests, url, _ledger_vouchers_xml(company, name, frm, to))
+        st = _parse_ledger_vouchers(st_raw) if st_raw else []
+        sales = [r for r in st if any(k in r['vtype'].lower() for k in ('sale', 'invoice'))]
+        if not sales:
+            print(f"  • {name[:40]:40s} → no sales vouchers in statement, trying next")
+            continue
+
+        invA = _parse_inventory_walk(
+            tally_request(requests, url, _walk_inventory_xml(company, name, frm, to)) or '')
+        invB_raw = tally_request(requests, url, _explode_inventory_xml(company, name, frm, to))
+        ledB_raw = tally_request(requests, url, _explode_ledgers_xml(company, name, frm, to))
+        invB = _parse_explode_inventory(invB_raw) if invB_raw else []
+        ledB = _parse_explode_ledgers(ledB_raw) if ledB_raw else []
+
+        if raw_dump:
+            print(f"\n  [EXPLODE inventory raw head] {(invB_raw or '')[:900]!r}")
+            print(f"\n  [EXPLODE ledger raw head]    {(ledB_raw or '')[:900]!r}\n")
+
+        a_ok = any(r['qty'] > 0 or r['rate'] > 0 for r in invA)
+        b_ok = any(r['qty'] > 0 or r['rate'] > 0 for r in invB)
+        print(f"\n  Party '{name}'")
+        print(f"    Method A  WALK   : {len(invA):>4} inv line(s) · qty/rate present: {'YES' if a_ok else 'NO'}")
+        print(f"    Method B  EXPLODE: {len(invB):>4} inv line(s) · qty/rate present: {'YES' if b_ok else 'NO'}")
+        print(f"    Tax/ledger lines (EXPLODE): {len(ledB)}")
+
+        inv = invB if b_ok else (invA if a_ok else (invB or invA))
+        if not inv:
+            print("    ❌ No inventory lines from either method — re-run with --raw and send")
+            print("       me the [EXPLODE ... raw head] lines so I can adjust the TDL.")
+            return
+
+        target = sales[0]['vno']
+        items = [r for r in inv if r['vno'] == target]
+        if not items:
+            target = inv[0]['vno']
+            items = [r for r in inv if r['vno'] == target]
+        ledgers = [r for r in ledB if r['vno'] == target]
+
+        method = 'EXPLODE' if inv is invB else 'WALK'
+        print(f"\n  ── Reconstructed invoice #{target}  (via {method}) ──")
+        print("    Line items:")
+        taxable = 0.0
+        for it in items:
+            taxable += it['amount']
+            print(f"      {it['item'][:30]:30s} {it['qty']:>8,.2f} {it['unit'][:4]:4s} "
+                  f"@ {it['rate']:>10,.2f} = Rs {it['amount']:>12,.2f}")
+        print(f"    Taxable value: Rs {taxable:,.2f}")
+        if ledgers:
+            print("    Ledger / tax breakup (party + sales + GST):")
+            for l in ledgers:
+                print(f"      {l['ledger'][:36]:36s} Rs {l['amount']:>12,.2f} {l['type']}")
+        else:
+            print("    (no ledger/tax lines regrouped for this voucher — check EXPLODE ledger head)")
+        print("\n  → Whichever method shows real qty + rate + tax is the one we wire in.")
+        return
+
+    print("\n  ⚠️  None of the tried ledgers yielded a sales invoice with line items.")
+    print('     Re-run targeting a party you know has sales: --ledger "NAME" --raw')
+
+
+def _bulk_ledgers_xml(company, from_str, to_str):
+    """ONE pass: explode AllLedgerEntries of EVERY voucher in the window (no
+    party filter). Each row = (voucher no + date + type, ledger, amount, Dr/Cr).
+    Python then buckets by ledger to build every party's statement at once."""
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnBulkLed</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnBulkLed"><FORMS>BLF</FORMS></REPORT>'
+        '<FORM NAME="BLF"><PARTS>BLP</PARTS></FORM>'
+        '<PART NAME="BLP"><TOPLINES>BLV</TOPLINES><REPEAT>BLV : BLC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BLV"><FIELDS>CHdr</FIELDS><EXPLODE>BLEP</EXPLODE></LINE>'
+        '<FIELD NAME="CHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="BLEP"><TOPLINES>BLE</TOPLINES><REPEAT>BLE : AllLedgerEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BLE"><FIELDS>CNo,CDate,CType,CLed,CAmt,CIsDr,CMid</FIELDS></LINE>'
+        '<FIELD NAME="CNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="CDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="CType"><SET>$VoucherTypeName</SET></FIELD>'
+        '<FIELD NAME="CLed"><SET>$LedgerName</SET></FIELD>'
+        '<FIELD NAME="CAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="CIsDr"><SET>$$IsDr:$Amount</SET></FIELD>'
+        '<FIELD NAME="CMid"><SET>$MasterId</SET></FIELD>'
+        '<COLLECTION NAME="BLC"><TYPE>Voucher</TYPE><FETCH>AllLedgerEntries</FETCH>'
+        '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkOpt">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _bulk_inventory_xml(company, from_str, to_str):
+    """ONE pass: explode AllInventoryEntries of EVERY voucher in the window.
+    Each row = (voucher no + date, party ledger, item, qty, rate, amount).
+    Python buckets by party+voucher to build every invoice at once."""
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+        '<TYPE>Data</TYPE><ID>StnBulkInv</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+        f'<SVFROMDATE>{from_str}</SVFROMDATE><SVTODATE>{to_str}</SVTODATE>'
+        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+        f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+        '<REPORT NAME="StnBulkInv"><FORMS>BIF</FORMS></REPORT>'
+        '<FORM NAME="BIF"><PARTS>BIP</PARTS></FORM>'
+        '<PART NAME="BIP"><TOPLINES>BIV</TOPLINES><REPEAT>BIV : BIC</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BIV"><FIELDS>BHdr</FIELDS><EXPLODE>BIEP</EXPLODE></LINE>'
+        '<FIELD NAME="BHdr"><SET>$VoucherNumber</SET></FIELD>'
+        '<PART NAME="BIEP"><TOPLINES>BIE</TOPLINES><REPEAT>BIE : AllInventoryEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+        '<LINE NAME="BIE"><FIELDS>BNo,BDate,BParty,BItem,BQty,BAQty,BRate,BAmt,BMid</FIELDS></LINE>'
+        '<FIELD NAME="BNo"><SET>$VoucherNumber</SET></FIELD>'
+        '<FIELD NAME="BDate"><SET>$Date</SET></FIELD>'
+        '<FIELD NAME="BParty"><SET>$PartyLedgerName</SET></FIELD>'
+        '<FIELD NAME="BItem"><SET>$StockItemName</SET></FIELD>'
+        '<FIELD NAME="BQty"><SET>$BilledQty</SET></FIELD>'
+        '<FIELD NAME="BAQty"><SET>$ActualQty</SET></FIELD>'
+        '<FIELD NAME="BRate"><SET>$Rate</SET></FIELD>'
+        '<FIELD NAME="BAmt"><SET>$Amount</SET></FIELD>'
+        '<FIELD NAME="BMid"><SET>$MasterId</SET></FIELD>'
+        '<COLLECTION NAME="BIC"><TYPE>Voucher</TYPE><FETCH>AllInventoryEntries</FETCH>'
+        '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
+        '<SYSTEM TYPE="Formulae" NAME="FBulkOpt">NOT $IsOptional</SYSTEM>'
+        '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    )
+
+
+def _parse_bulk_ledgers(raw):
+    nos = findall('CNO', raw)
+    leds = findall('CLED', raw)
+    amts = findall('CAMT', raw)
+    isdrs = findall('CISDR', raw)
+    mids = findall('CMID', raw)
+    rows = []
+    for i in range(len(leds)):
+        signed = _parse_signed_amount(amts[i]) if i < len(amts) else 0.0
+        flag = (isdrs[i].strip().lower() if i < len(isdrs) else '')
+        typ = 'Dr' if flag in ('yes', 'true', '1') else ('Cr' if flag in ('no', 'false', '0')
+              else ('Dr' if signed < 0 else 'Cr'))
+        rows.append({
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'mid': mids[i].strip() if i < len(mids) else '',
+            'ledger': leds[i].strip(),
+            'amount': abs(signed), 'type': typ,
+        })
+    return rows
+
+
+def _parse_bulk_inventory(raw):
+    nos = findall('BNO', raw)
+    parties = findall('BPARTY', raw)
+    items = findall('BITEM', raw)
+    qtys = findall('BQTY', raw)
+    aqtys = findall('BAQTY', raw)
+    rates = findall('BRATE', raw)
+    amts = findall('BAMT', raw)
+    mids = findall('BMID', raw)
+    rows = []
+    for i in range(len(items)):
+        qv, qu = parse_quantity(qtys[i]) if i < len(qtys) else (0.0, '')
+        if qv == 0 and i < len(aqtys):
+            qv, qu2 = parse_quantity(aqtys[i])
+            qu = qu or qu2
+        rows.append({
+            'vno': nos[i].strip() if i < len(nos) else '',
+            'mid': mids[i].strip() if i < len(mids) else '',
+            'party': parties[i].strip() if i < len(parties) else '',
+            'item': items[i].strip(),
+            'qty': qv, 'unit': qu,
+            'rate': abs(_parse_signed_amount(rates[i])) if i < len(rates) else 0.0,
+            'amount': abs(_parse_signed_amount(amts[i])) if i < len(amts) else 0.0,
+        })
+    return rows
+
+
+def probe_bulk_explode(requests, url, company, days=90, raw_dump=False, debtors=None):
+    import time
+    from collections import Counter
+    debtors = debtors or set()
+    hr("7. BULK EXPLODE PROBE (one pass for ALL parties — scalability)")
+    print("Confirms the scalable engine: ONE windowed EXPLODE over every voucher,")
+    print("bucketed by party in Python — vs 971 per-party scans that hung earlier.")
+
+    try:
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=days)
+    except Exception:
+        print("  datetime unavailable; skipping.")
+        return
+    frm, to = from_date.strftime('%Y%m%d'), to_date.strftime('%Y%m%d')
+    print(f"  Window: {frm}–{to} ({days} days), no party filter.\n")
+
+    t0 = time.time()
+    led_raw = tally_request(requests, url, _bulk_ledgers_xml(company, frm, to))
+    t_led = time.time() - t0
+    led = _parse_bulk_ledgers(led_raw) if led_raw else []
+
+    t0 = time.time()
+    inv_raw = tally_request(requests, url, _bulk_inventory_xml(company, frm, to))
+    t_inv = time.time() - t0
+    inv = _parse_bulk_inventory(inv_raw) if inv_raw else []
+
+    if raw_dump:
+        print(f"  [bulk ledger head]    {(led_raw or '')[:700]!r}\n")
+        print(f"  [bulk inventory head] {(inv_raw or '')[:700]!r}\n")
+
+    # Join inventory → party via MasterId. A sales voucher's customer is the
+    # ledger entry that is a KNOWN debtor (Sundry Debtor); we prefer that over a
+    # bare "first Dr" (which can wrongly pick the sales ledger on returns etc.).
+    # This mirrors exactly how the real sync will attribute each invoice.
+    mid_debtor, mid_firstdr = {}, {}
+    for r in led:
+        if r['type'] == 'Dr' and r['mid']:
+            if r['ledger'] in debtors and r['mid'] not in mid_debtor:
+                mid_debtor[r['mid']] = r['ledger']
+            if r['mid'] not in mid_firstdr:
+                mid_firstdr[r['mid']] = r['ledger']
+    for r in inv:
+        if not r['party']:
+            r['party'] = mid_debtor.get(r['mid']) or mid_firstdr.get(r['mid'], '')
+
+    led_parties = len({r['ledger'] for r in led})
+    inv_parties = len({r['party'] for r in inv if r['party']})
+    joined = sum(1 for r in inv if r['party'])
+    qty_ok = any(r['qty'] > 0 or r['rate'] > 0 for r in inv)
+
+    print(f"  Ledger   explode: {len(led):>6} lines · {len({r['mid'] for r in led})} vouchers · "
+          f"{led_parties} distinct ledgers · {t_led:5.1f}s")
+    print(f"  Inventory explode:{len(inv):>6} lines · {len({r['mid'] for r in inv})} vouchers · "
+          f"{inv_parties} parties (via MasterId join) · {t_inv:5.1f}s")
+    print(f"  Inventory qty/rate present: {'YES' if qty_ok else 'NO'} · "
+          f"party resolved on {joined}/{len(inv)} inv lines")
+
+    if not led and not inv:
+        print("  ❌ Bulk explode returned nothing — re-run with --raw and send the heads.")
+        return
+
+    # Prove the bucketing works: reconstruct one invoice for a real party.
+    if inv:
+        cnt = Counter(r['party'] for r in inv if r['party'])
+        if cnt:
+            party = cnt.most_common(1)[0][0]
+            pv = [r for r in inv if r['party'] == party]
+            mid = pv[0]['mid']
+            items = [r for r in pv if r['mid'] == mid]
+            print(f"\n  Bucketed sample — party '{party}', invoice #{items[0]['vno']}:")
+            for it in items[:6]:
+                print(f"    {it['item'][:30]:30s} {it['qty']:>8,.2f} {it['unit'][:4]:4s} "
+                      f"@ {it['rate']:>10,.2f} = Rs {it['amount']:>12,.2f}")
+        else:
+            print("\n  ⚠️  Could not resolve any party via the join — re-run with --raw so I")
+            print("     can check the CMID/BMID (MasterId) tags in the heads.")
+
+    print(f"\n  → BOTH passes covered ALL parties in ~{t_led + t_inv:.0f}s for this {days}-day window.")
+    print("    That is the whole-company engine for statements + invoices in 2 requests,")
+    print("    versus ~971 per-party scans. If the counts look complete, bulk is the way.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tally Diagnostic & Structure Explorer")
     parser.add_argument("--company", default="SHANTINATH AGRO AGENCIES ARNI 2024-2027",
@@ -558,6 +1252,9 @@ def main():
                         help="Voucher window to inspect (default: 90)")
     parser.add_argument("--raw", action="store_true",
                         help="Dump raw response heads for stock & vouchers")
+    parser.add_argument("--ledger", default="",
+                        help="Exact ledger name to test in the Ledger Statement "
+                             "probe (default: auto-pick an active debtor)")
     args = parser.parse_args()
 
     hr("SYSTEM & DEPENDENCY CHECKS")
@@ -631,11 +1328,18 @@ def main():
 
         print(f"\nUsing company: '{effective_company}'")
         groups = explore_groups(requests, args.tally_url, effective_company)
-        debtor_names = explore_ledgers(requests, args.tally_url, effective_company, groups)
+        debtor_names, ledger_candidates = explore_ledgers(
+            requests, args.tally_url, effective_company, groups)
         explore_stock(requests, args.tally_url, effective_company, raw_dump=args.raw)
         explore_vouchers(requests, args.tally_url, effective_company, args.days,
                          raw_dump=args.raw, debtor_names=debtor_names)
         probe_vouchers(requests, args.tally_url, effective_company)
+        probe_ledger_statement(requests, args.tally_url, effective_company,
+                               ledger_candidates, chosen=args.ledger, raw_dump=args.raw)
+        probe_invoice(requests, args.tally_url, effective_company,
+                      ledger_candidates, chosen=args.ledger, raw_dump=args.raw)
+        probe_bulk_explode(requests, args.tally_url, effective_company,
+                           days=args.days, raw_dump=args.raw, debtors=debtor_names)
 
     hr("DIAGNOSTIC COMPLETE")
     print("Review the sections above. Anything marked ⚠️ or ❌ is worth fixing")

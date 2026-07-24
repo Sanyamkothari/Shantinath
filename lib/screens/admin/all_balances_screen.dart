@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shantinath_agro/screens/admin/party_ledger_screen.dart';
 
 /// Admin "Ledger Book" — shows the outstanding Dr/Cr balance of every customer
 /// synced from Tally, regardless of whether they have registered on the app.
@@ -82,8 +83,8 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
 
                 // Map + filter.
                 final all = docs
-                    .map((d) =>
-                        _Ledger.fromDoc(d.data() as Map<String, dynamic>))
+                    .map((d) => _Ledger.fromDoc(
+                        d.data() as Map<String, dynamic>, d.id))
                     .toList();
 
                 final filtered = _query.isEmpty
@@ -220,14 +221,26 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
     final hasBalance = l.balance != 0;
     final color = l.balanceType == 'Cr' ? _green : _drRed;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PartyLedgerScreen(
+          ledgerName: l.name,
+          docId: l.id,
+          village: l.village,
+          phone: l.phone,
+          balance: l.balance,
+          balanceType: l.balanceType,
+        ),
+      )),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,7 +284,8 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -309,6 +323,7 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
 
 /// A single Tally customer balance row.
 class _Ledger {
+  final String id; // Firestore doc id = the tally_ledgers document
   final String name;
   final String village;
   final String phone;
@@ -316,6 +331,7 @@ class _Ledger {
   final String balanceType; // 'Dr' or 'Cr'
 
   const _Ledger({
+    required this.id,
     required this.name,
     required this.village,
     required this.phone,
@@ -323,8 +339,9 @@ class _Ledger {
     required this.balanceType,
   });
 
-  factory _Ledger.fromDoc(Map<String, dynamic> d) {
+  factory _Ledger.fromDoc(Map<String, dynamic> d, String id) {
     return _Ledger(
+      id: id,
       name: (d['name'] as String?)?.trim() ?? 'Unknown',
       village: (d['village'] as String?)?.trim() ?? '',
       phone: (d['phone'] as String?)?.trim() ?? '',
