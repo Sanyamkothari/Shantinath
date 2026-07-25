@@ -1159,6 +1159,108 @@ def _parse_bulk_inventory(raw):
     return rows
 
 
+def probe_hsn_batch(requests, url, company, days=90, raw_dump=False):
+    """Section 8 — find the TDL expressions that yield HSN/SAC and Batch on an
+    exploded inventory entry.
+
+    These two columns are on the printed TAX INVOICE but are NOT in the sync
+    yet, deliberately: Tally fails the ENTIRE export when a TDL references a
+    method it doesn't recognise, so guessing inside the working
+    get_bulk_inventory_xml would take the invoice pipeline down with it. Each
+    candidate below is therefore sent as its own isolated request — a candidate
+    that errors costs nothing but that one request.
+
+    Whichever candidates come back populated are the ones to wire into
+    tally_sync.get_bulk_inventory_xml (add the FIELD + its tag to the LINE, then
+    read it in parse_bulk_inventory into the row's 'hsn' / 'batch' key, which
+    already exist and currently default to '')."""
+    hr("8. HSN / BATCH FIELD PROBE (for the TAX INVOICE format)")
+
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=days)
+    fs, ts = from_date.strftime('%Y%m%d'), to_date.strftime('%Y%m%d')
+    comp = f"<SVCURRENTCOMPANY>{_xml_escape(company)}</SVCURRENTCOMPANY>" if company else ""
+
+    # (label, TDL expression). Ordered most- to least-likely.
+    candidates = [
+        ('hsn',   '$GSTHSNCode'),
+        ('hsn',   '$HSNCode'),
+        ('hsn',   '$$StockItemHSN:$StockItemName'),
+        ('hsn',   '$GSTDetails'),
+        ('batch', '$BatchName'),
+        ('batch', '$$FilterValue:$BatchName:BatchAllocations:First:FBAny'),
+        ('batch', '$$CollectionFieldByKey:$BatchName:1:BatchAllocations'),
+    ]
+
+    def payload(expr):
+        return (
+            '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+            '<TYPE>Data</TYPE><ID>StnProbeHB</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+            f'<SVFROMDATE>{fs}</SVFROMDATE><SVTODATE>{ts}</SVTODATE>'
+            '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+            f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+            '<REPORT NAME="StnProbeHB"><FORMS>PHF</FORMS></REPORT>'
+            '<FORM NAME="PHF"><PARTS>PHP</PARTS></FORM>'
+            '<PART NAME="PHP"><TOPLINES>PHV</TOPLINES><REPEAT>PHV : PHC</REPEAT>'
+            '<SCROLLED>Vertical</SCROLLED></PART>'
+            '<LINE NAME="PHV"><FIELDS>PHdr</FIELDS><EXPLODE>PHEP</EXPLODE></LINE>'
+            '<FIELD NAME="PHdr"><SET>$VoucherNumber</SET></FIELD>'
+            '<PART NAME="PHEP"><TOPLINES>PHE</TOPLINES>'
+            '<REPEAT>PHE : AllInventoryEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
+            '<LINE NAME="PHE"><FIELDS>PItem,PVal</FIELDS></LINE>'
+            '<FIELD NAME="PItem"><SET>$StockItemName</SET></FIELD>'
+            f'<FIELD NAME="PVal"><SET>{expr}</SET></FIELD>'
+            '<COLLECTION NAME="PHC"><TYPE>Voucher</TYPE>'
+            '<FETCH>AllInventoryEntries,BatchAllocations</FETCH>'
+            '<FILTER>FPCancel</FILTER></COLLECTION>'
+            '<SYSTEM TYPE="Formulae" NAME="FPCancel">NOT $IsCancelled</SYSTEM>'
+            '<SYSTEM TYPE="Formulae" NAME="FBAny">$$IsEmpty:$$Nothing OR NOT $$IsEmpty:$BatchName</SYSTEM>'
+            '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+        )
+
+    headers = {'Content-Type': 'text/xml; charset=utf-8'}
+    winners = {}
+    for kind, expr in candidates:
+        try:
+            r = requests.post(url, data=payload(expr), headers=headers, timeout=120)
+            r.raise_for_status()
+            raw = r.content.decode('utf-8', errors='ignore')
+        except Exception as e:
+            print(f"  ❌ {kind:5} {expr:58} request failed ({type(e).__name__})")
+            continue
+
+        if '<LINEERROR>' in raw.upper() or 'Unknown' in raw[:400]:
+            print(f"  ❌ {kind:5} {expr:58} rejected by Tally")
+            continue
+
+        vals = [v.strip() for v in re.findall(r'<PVAL>(.*?)</PVAL>', raw, re.DOTALL)]
+        items = [v.strip() for v in re.findall(r'<PITEM>(.*?)</PITEM>', raw, re.DOTALL)]
+        filled = [v for v in vals if v]
+        if not vals:
+            print(f"  ⚠️  {kind:5} {expr:58} no rows returned")
+        elif not filled:
+            print(f"  ⚠️  {kind:5} {expr:58} {len(vals)} rows, ALL EMPTY")
+        else:
+            pct = 100 * len(filled) / len(vals)
+            sample = ', '.join(f"{i}={v}" for i, v in list(zip(items, vals))[:3] if v)
+            print(f"  ✅ {kind:5} {expr:58} {len(filled)}/{len(vals)} filled ({pct:.0f}%)")
+            print(f"       e.g. {sample[:110]}")
+            winners.setdefault(kind, expr)
+        if raw_dump:
+            print(f"       --- raw head ---\n{raw[:600]}\n")
+
+    print()
+    if winners:
+        print("  WIRE THESE INTO tally_sync.get_bulk_inventory_xml:")
+        for kind, expr in winners.items():
+            print(f"    {kind}: {expr}")
+    else:
+        print("  No candidate worked. HSN/Batch may not be set on these stock items,")
+        print("  or this Tally exposes them under a different method — check a stock")
+        print("  item's GST Details in Tally before extending the TDL.")
+    return winners
+
+
 def probe_bulk_explode(requests, url, company, days=90, raw_dump=False, debtors=None):
     import time
     from collections import Counter
@@ -1340,6 +1442,8 @@ def main():
                       ledger_candidates, chosen=args.ledger, raw_dump=args.raw)
         probe_bulk_explode(requests, args.tally_url, effective_company,
                            days=args.days, raw_dump=args.raw, debtors=debtor_names)
+        probe_hsn_batch(requests, args.tally_url, effective_company,
+                        days=args.days, raw_dump=args.raw)
 
     hr("DIAGNOSTIC COMPLETE")
     print("Review the sections above. Anything marked ⚠️ or ❌ is worth fixing")

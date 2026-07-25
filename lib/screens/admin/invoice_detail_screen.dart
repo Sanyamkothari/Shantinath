@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/services/invoice_pdf_service.dart';
 
 /// Shows one sales invoice (bill) in full — line items + charges + total — with
@@ -12,6 +11,7 @@ class InvoiceDetailScreen extends StatelessWidget {
   final String partyName;
   final String partyVillage;
   final String partyPhone;
+  final String partyGstNo;
 
   const InvoiceDetailScreen({
     super.key,
@@ -19,6 +19,7 @@ class InvoiceDetailScreen extends StatelessWidget {
     required this.partyName,
     this.partyVillage = '',
     this.partyPhone = '',
+    this.partyGstNo = '',
   });
 
   static const Color _green = Color(0xFF2E7D32);
@@ -48,20 +49,31 @@ class InvoiceDetailScreen extends StatelessWidget {
   double get _taxable => (invoice['taxableValue'] as num?)?.toDouble() ?? 0.0;
   double get _total => (invoice['total'] as num?)?.toDouble() ?? 0.0;
 
+  /// Synced line items mapped to the PDF's row model. `hsn` and `batch` stay
+  /// empty until the Tally sync backfills them; the columns render blank rather
+  /// than collapsing, so the layout matches the printed invoice either way.
+  List<InvoiceLine> get _invoiceLines => _items
+      .map((it) => InvoiceLine(
+            description: (it['item'] ?? '').toString(),
+            batch: (it['batch'] ?? '').toString(),
+            hsn: (it['hsn'] ?? '').toString(),
+            qty: (it['qty'] as num?)?.toDouble() ?? 0,
+            unit: (it['unit'] ?? '').toString(),
+            rate: (it['rate'] as num?)?.toDouble() ?? 0,
+            amount: (it['amount'] as num?)?.toDouble() ?? 0,
+          ))
+      .toList();
+
   Future<void> _share(BuildContext context) async {
     try {
       final bytes = await InvoicePdfService().build(
-        sellerName: AppConstants.sellerName,
-        sellerAddress: AppConstants.sellerAddress,
         partyName: partyName,
-        partyVillage: partyVillage,
-        partyPhone: partyPhone,
+        partyAddress: partyVillage,
+        partyGstNo: partyGstNo,
         invoiceNo: (invoice['voucherNo'] ?? '').toString(),
-        voucherType: (invoice['voucherType'] ?? 'Invoice').toString(),
+        refNo: (invoice['refNo'] ?? '').toString(),
         date: _date,
-        items: _items,
-        ledgers: _ledgers,
-        taxableValue: _taxable,
+        items: _invoiceLines,
         total: _total,
       );
       final no = (invoice['voucherNo'] ?? 'bill')

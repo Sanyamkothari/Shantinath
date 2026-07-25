@@ -144,7 +144,7 @@ def get_ledgers_xml(company_name=None):
             <SCROLLED>Vertical</SCROLLED>
           </PART>
           <LINE NAME="LedLine">
-            <LEFTFIELDS>LedNameF, LedParentF, LedBalF, LedIsDrF, LedPhoneF, LedGSTF</LEFTFIELDS>
+            <LEFTFIELDS>LedNameF, LedParentF, LedBalF, LedIsDrF, LedPhoneF, LedGSTF, LedStateF</LEFTFIELDS>
           </LINE>
           <FIELD NAME="LedNameF">
             <SET>$Name</SET>
@@ -160,6 +160,9 @@ def get_ledgers_xml(company_name=None):
           </FIELD>
           <FIELD NAME="LedPhoneF">
             <SET>$LedgerMobile</SET>
+          </FIELD>
+          <FIELD NAME="LedStateF">
+            <SET>$LedStateName</SET>
           </FIELD>
           <FIELD NAME="LedGSTF">
             <SET>$GSTRegistrationNo</SET>
@@ -485,7 +488,7 @@ def get_bulk_ledgers_xml(company, from_str, to_str):
         '<LINE NAME="BLV"><FIELDS>CHdr</FIELDS><EXPLODE>BLEP</EXPLODE></LINE>'
         '<FIELD NAME="CHdr"><SET>$VoucherNumber</SET></FIELD>'
         '<PART NAME="BLEP"><TOPLINES>BLE</TOPLINES><REPEAT>BLE : AllLedgerEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
-        '<LINE NAME="BLE"><FIELDS>CNo,CDate,CType,CLed,CAmt,CIsDr,CMid,CNarr</FIELDS></LINE>'
+        '<LINE NAME="BLE"><FIELDS>CNo,CDate,CType,CLed,CAmt,CIsDr,CMid,CNarr,CRef</FIELDS></LINE>'
         '<FIELD NAME="CNo"><SET>$VoucherNumber</SET></FIELD>'
         '<FIELD NAME="CDate"><SET>$Date</SET></FIELD>'
         '<FIELD NAME="CType"><SET>$VoucherTypeName</SET></FIELD>'
@@ -494,6 +497,7 @@ def get_bulk_ledgers_xml(company, from_str, to_str):
         '<FIELD NAME="CIsDr"><SET>$$IsDr:$Amount</SET></FIELD>'
         '<FIELD NAME="CMid"><SET>$MasterId</SET></FIELD>'
         '<FIELD NAME="CNarr"><SET>$Narration</SET></FIELD>'
+        '<FIELD NAME="CRef"><SET>$Reference</SET></FIELD>'
         '<COLLECTION NAME="BLC"><TYPE>Voucher</TYPE><FETCH>AllLedgerEntries</FETCH>'
         '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
         '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
@@ -547,6 +551,7 @@ def parse_bulk_ledgers(raw):
     isdrs = re.findall(r'<CISDR>(.*?)</CISDR>', raw, re.DOTALL)
     mids = re.findall(r'<CMID>(.*?)</CMID>', raw, re.DOTALL)
     narrs = re.findall(r'<CNARR>(.*?)</CNARR>', raw, re.DOTALL)
+    refs = re.findall(r'<CREF>(.*?)</CREF>', raw, re.DOTALL)
     rows = []
     for i in range(len(leds)):
         signed = _parse_signed_amount(amts[i]) if i < len(amts) else 0.0
@@ -562,6 +567,7 @@ def parse_bulk_ledgers(raw):
             'amount': abs(signed),
             'type': typ,
             'narration': narrs[i].strip() if i < len(narrs) else '',
+            'refNo': refs[i].strip() if i < len(refs) else '',
         })
     return rows
 
@@ -739,10 +745,17 @@ def bucket_statements_invoices(led_rows, inv_rows, debtor_names, shop_names):
                 'voucherNo': head['voucherNo'] if head else '',
                 'voucherType': head['voucherType'] if head else '',
                 'date': head['date'] if head else datetime.now(),
+                'refNo': (head.get('refNo', '') if head else ''),
                 'taxableValue': round(sum(it['amount'] for it in items), 2),
                 'total': round(total, 2),
+                # hsn/batch stay '' until the TDL fields are confirmed against a
+                # live Tally (see probe_hsn_batch in diagnose_tally.py). The keys
+                # ship now so the invoice PDF and Firestore schema don't change
+                # shape later.
                 'items': [{'item': it['item'], 'qty': it['qty'], 'unit': it['unit'],
-                           'rate': it['rate'], 'amount': it['amount']} for it in items],
+                           'rate': it['rate'], 'amount': it['amount'],
+                           'hsn': it.get('hsn', ''), 'batch': it.get('batch', '')}
+                          for it in items],
                 'ledgers': [{'ledger': L['ledger'], 'amount': L['amount'],
                              'type': L['type']} for L in ledgers],
             })
@@ -933,6 +946,7 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
     isdrs = re.findall(r'<LEDISDRF>(.*?)</LEDISDRF>', raw)
     phones = re.findall(r'<LEDPHONEF>(.*?)</LEDPHONEF>', raw)
     gsts = re.findall(r'<LEDGSTF>(.*?)</LEDGSTF>', raw)
+    states = re.findall(r'<LEDSTATEF>(.*?)</LEDSTATEF>', raw)
 
     print(f"  Fetched {len(names)} total ledgers from Tally")
 
@@ -946,6 +960,7 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
         isdr_str = isdrs[i] if i < len(isdrs) else ""
         phone_str = phones[i] if i < len(phones) else ""
         gst_str = gsts[i] if i < len(gsts) else ""
+        state_str = states[i] if i < len(states) else ""
 
         if not name:
             continue
@@ -969,7 +984,8 @@ def fetch_ledgers_from_tally(tally_url, debtor_groups, shop_list_groups, company
             'outstandingBalance': balance,
             'balanceType': bal_type,
             'phone': phone_clean,
-            'gstNo': gst_str.strip() if gst_str else ""
+            'gstNo': gst_str.strip() if gst_str else "",
+            'state': state_str.strip() if state_str else "",
         }
 
         # Check if this ledger belongs to any Sundry Debtor sub-group
@@ -1300,6 +1316,7 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
             'village': ledger['parent'],  # City/area group name
             'phone': ledger['phone'],
             'gstNo': ledger['gstNo'],
+            'state': ledger.get('state', ''),
             'outstandingBalance': ledger['outstandingBalance'],
             'balanceType': ledger['balanceType'],
             'updatedAt': firestore.SERVER_TIMESTAMP,
@@ -1390,6 +1407,7 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
                 'voucherNo': inv['voucherNo'],
                 'voucherType': inv['voucherType'],
                 'date': inv['date'],
+                'refNo': inv.get('refNo', ''),
                 'masterId': str(inv.get('mid', '')),
                 'taxableValue': inv['taxableValue'],
                 'total': inv['total'],

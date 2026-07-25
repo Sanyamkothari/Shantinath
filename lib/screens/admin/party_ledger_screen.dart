@@ -16,6 +16,7 @@ class PartyLedgerScreen extends StatefulWidget {
   final String docId;
   final String village;
   final String phone;
+  final String gstNo;
   final double balance;
   final String balanceType; // 'Dr' | 'Cr'
 
@@ -27,6 +28,7 @@ class PartyLedgerScreen extends StatefulWidget {
     required this.balanceType,
     this.village = '',
     this.phone = '',
+    this.gstNo = '',
   });
 
   @override
@@ -445,6 +447,7 @@ class _BillsTab extends StatelessWidget {
           partyName: state.widget.ledgerName,
           partyVillage: state.widget.village,
           partyPhone: state.widget.phone,
+          partyGstNo: state.widget.gstNo,
         ),
       )),
       child: Container(

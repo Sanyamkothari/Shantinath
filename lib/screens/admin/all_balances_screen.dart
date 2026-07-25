@@ -229,6 +229,7 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
           docId: l.id,
           village: l.village,
           phone: l.phone,
+          gstNo: l.gstNo,
           balance: l.balance,
           balanceType: l.balanceType,
         ),
@@ -327,6 +328,7 @@ class _Ledger {
   final String name;
   final String village;
   final String phone;
+  final String gstNo;
   final double balance;
   final String balanceType; // 'Dr' or 'Cr'
 
@@ -335,6 +337,7 @@ class _Ledger {
     required this.name,
     required this.village,
     required this.phone,
+    required this.gstNo,
     required this.balance,
     required this.balanceType,
   });
@@ -345,6 +348,7 @@ class _Ledger {
       name: (d['name'] as String?)?.trim() ?? 'Unknown',
       village: (d['village'] as String?)?.trim() ?? '',
       phone: (d['phone'] as String?)?.trim() ?? '',
+      gstNo: (d['gstNo'] as String?)?.trim() ?? '',
       balance: (d['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
       balanceType: (d['balanceType'] as String?) ?? 'Dr',
     );

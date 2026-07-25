@@ -111,16 +111,33 @@ class AppConstants {
   static const String adminName = 'Admin';
   static const String cloudFunctionsRegion = 'us-central1'; // Change if deploying to another region (e.g. asia-south1)
 
-  // ── Seller details (printed on delivery memos) ─────────────────────────
+  // ── Seller details (printed on tax invoices and delivery memos) ────────
+  // Transcribed from the firm's Tally TAX INVOICE. These are regulatory
+  // identifiers that appear on legal documents — verify against a printed
+  // invoice before changing.
   // TODO: move to an admin-editable Settings screen in Phase 2.
-  static const String sellerName = 'Shantinath Agro Agency';
+  static const String sellerName = 'SHANTINATH AGRO AGENCIES ARNI 2024-2027';
   static const String sellerAddress =
-      'Main Road, Arni, Dist. Yavatmal, Maharashtra';
-  static const String sellerPhone = '';
-  static const String sellerGstNo = '';
-  static const String sellerSeedLicence = '';
-  static const String sellerFertilizerLicence = '';
+      'AT POST-ARNI, MAHUR ROAD, DIST YAVATMAL [M.S.]';
+  static const String sellerPhone = '9422167401/7798167401';
+  static const String sellerEmail = 'shantinathagro97@gmail.com';
+  static const String sellerGstNo = '27AGXPK4310L1ZY';
+  static const String sellerPan = 'AGXPK4310L';
+  static const String sellerStateName = 'Maharashtra';
+  static const String sellerStateCode = '27';
+  static const String sellerJurisdiction = 'ARNI';
+
+  static const String sellerSeedLicence = 'LCSD0320220381YVT';
+  static const String sellerSeedLicence2 = 'LCSD0620221190YVT';
+  static const String sellerFertilizerWholesaleLicence = 'LCFWD06202220263YVT';
+  static const String sellerFertilizerRetailLicence = 'LCFRD0620222183YVT';
+  // Kept for the delivery-memo model, which stores a single fertilizer licence.
+  static const String sellerFertilizerLicence = sellerFertilizerWholesaleLicence;
   static const String sellerPesticideLicence = '';
+
+  // Printed under the invoice declaration.
+  static const int invoicePaymentDays = 10;
+  static const double invoiceOverdueInterestPct = 24;
 
 
   // ── Validation ─────────────────────────────────────────────────────────
