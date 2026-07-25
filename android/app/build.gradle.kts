@@ -1,4 +1,8 @@
-    plugins {
+// Must be a real import: inside the Gradle Kotlin DSL `java` resolves to the
+// Java plugin extension, so a fully-qualified `java.util.Properties` won't compile.
+import java.util.Properties
+
+plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
@@ -6,10 +10,33 @@
     id("com.google.firebase.crashlytics")
 }
 
+// Release signing credentials. android/key.properties is gitignored and points
+// at a keystore stored OUTSIDE this repo. If it is missing (fresh clone, CI, or
+// another developer's machine) the release build falls back to debug signing and
+// says so loudly, rather than failing with an opaque Gradle error.
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+val releaseStorePath: String? = keystoreProperties.getProperty("storeFile")
+val hasReleaseSigning = releaseStorePath != null && file(releaseStorePath).exists()
+
 android {
     namespace = "com.shantinathagroagency.shantinath_agro"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStorePath!!)
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,9 +56,24 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // println, not logger.warn — Gradle warn-level output is swallowed by
+            // `flutter build`, which is how a silent fallback to debug signing
+            // slipped through once already. Always say which key was used.
+            signingConfig = if (hasReleaseSigning) {
+                println("[signing] RELEASE build signed with upload key: $releaseStorePath")
+                signingConfigs.getByName("release")
+            } else {
+                println(
+                    "\n*** WARNING: no usable release keystore (android/key.properties " +
+                    "missing, or storeFile does not resolve) — signing the RELEASE build " +
+                    "with DEBUG keys. This APK cannot be published, and anyone who installs " +
+                    "it cannot upgrade to a properly signed build. ***\n" +
+                    "    storeFile read as: $releaseStorePath\n" +
+                    "    NOTE: backslashes are escape characters in .properties files — " +
+                    "use forward slashes.\n"
+                )
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
