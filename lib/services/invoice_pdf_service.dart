@@ -6,6 +6,42 @@ import 'package:printing/printing.dart';
 import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/utils/amount_in_words.dart';
 
+/// Which Tally document is being printed. The two share a layout and differ
+/// only in the heading, the number label, the closing note, and whether the
+/// Place of Supply line appears (the firm's credit note omits it).
+enum TaxDocumentKind {
+  invoice(
+    title: 'TAX INVOICE',
+    numberLabel: 'Invoice No.',
+    closingNote: 'This is a Computer Generated Invoice',
+    showsPlaceOfSupply: true,
+  ),
+  creditNote(
+    title: 'CREDITNOTE',
+    numberLabel: 'Credit Note No.',
+    closingNote: 'This is a Computer Generated Document',
+    showsPlaceOfSupply: false,
+  );
+
+  const TaxDocumentKind({
+    required this.title,
+    required this.numberLabel,
+    required this.closingNote,
+    required this.showsPlaceOfSupply,
+  });
+
+  final String title;
+  final String numberLabel;
+  final String closingNote;
+  final bool showsPlaceOfSupply;
+
+  /// Maps the `docType` written by the Tally sync. Unknown or missing values
+  /// fall back to invoice, which is how documents synced before docType existed
+  /// are treated.
+  static TaxDocumentKind fromDocType(String? docType) =>
+      docType == 'credit_note' ? creditNote : invoice;
+}
+
 /// One line of the invoice goods table.
 class InvoiceLine {
   final String description;
@@ -58,6 +94,7 @@ class InvoicePdfService {
     required DateTime date,
     required List<InvoiceLine> items,
     required double total,
+    TaxDocumentKind kind = TaxDocumentKind.invoice,
     String refNo = '',
     String partyState = AppConstants.sellerStateName,
     String partyStateCode = AppConstants.sellerStateCode,
@@ -80,23 +117,23 @@ class InvoicePdfService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.fromLTRB(28, 24, 28, 24),
         build: (ctx) => [
-          _topBar(invoiceNo, refNo, date),
+          _topBar(kind, invoiceNo, refNo, date),
           pw.SizedBox(height: 10),
           _sellerBlock(),
           pw.SizedBox(height: 8),
           pw.Center(
-            child: pw.Text('TAX INVOICE', style: _s(size: 11, bold: true)),
+            child: pw.Text(kind.title, style: _s(size: 11, bold: true)),
           ),
           pw.SizedBox(height: 6),
-          _partyBlock(
-              partyName, partyAddress, partyState, partyStateCode, partyGstNo),
+          _partyBlock(kind, partyName, partyAddress, partyState,
+              partyStateCode, partyGstNo),
           pw.SizedBox(height: 4),
           _goodsTable(items, total),
           _amountInWordsBlock(total),
           pw.SizedBox(height: 6),
           _hsnSummary(items, total),
           pw.SizedBox(height: 8),
-          _footer(),
+          _footer(kind),
         ],
       ),
     );
@@ -105,16 +142,19 @@ class InvoicePdfService {
 
   // ── header ───────────────────────────────────────────────────────────────
 
-  pw.Widget _topBar(String invoiceNo, String refNo, DateTime date) => pw.Row(
+  pw.Widget _topBar(
+          TaxDocumentKind kind, String invoiceNo, String refNo, DateTime date) =>
+      pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Expanded(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text('Invoice No.   $invoiceNo', style: _s()),
-                if (refNo.isNotEmpty)
-                  pw.Text('Ref. No.   $refNo', style: _s()),
+                pw.Text('${kind.numberLabel}   $invoiceNo', style: _s()),
+                // Ref. No. prints even when blank: it is a fixed line on the
+                // firm's stationery (the credit note shows it empty).
+                pw.Text('Ref. No.   $refNo', style: _s()),
               ],
             ),
           ),
@@ -169,8 +209,8 @@ class InvoicePdfService {
     );
   }
 
-  pw.Widget _partyBlock(String name, String address, String state,
-          String stateCode, String gstNo) =>
+  pw.Widget _partyBlock(TaxDocumentKind kind, String name, String address,
+          String state, String stateCode, String gstNo) =>
       pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
@@ -184,7 +224,8 @@ class InvoicePdfService {
             pw.Text('           GSTIN/UIN        : $gstNo', style: _s()),
           pw.Text('           State Name      : $state, Code : $stateCode',
               style: _s()),
-          pw.Text('           Place of Supply : $state', style: _s()),
+          if (kind.showsPlaceOfSupply)
+            pw.Text('           Place of Supply : $state', style: _s()),
         ],
       );
 
@@ -349,7 +390,7 @@ class InvoicePdfService {
 
   // ── footer ───────────────────────────────────────────────────────────────
 
-  pw.Widget _footer() => pw.Column(
+  pw.Widget _footer(TaxDocumentKind kind) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
           pw.Text('Tax Amount (in words) :  NIL', style: _s()),
@@ -398,7 +439,7 @@ class InvoicePdfService {
           ),
           pw.SizedBox(height: 4),
           pw.Center(
-            child: pw.Text('This is a Computer Generated Invoice',
+            child: pw.Text(kind.closingNote,
                 style: _s(size: 7.5).copyWith(
                     decoration: pw.TextDecoration.underline)),
           ),

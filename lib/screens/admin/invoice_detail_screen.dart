@@ -46,6 +46,11 @@ class InvoiceDetailScreen extends StatelessWidget {
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
 
+  /// Sales bill or credit note. Documents synced before `docType` existed have
+  /// no value and are treated as invoices.
+  TaxDocumentKind get _kind =>
+      TaxDocumentKind.fromDocType(invoice['docType'] as String?);
+
   double get _taxable => (invoice['taxableValue'] as num?)?.toDouble() ?? 0.0;
   double get _total => (invoice['total'] as num?)?.toDouble() ?? 0.0;
 
@@ -70,6 +75,7 @@ class InvoiceDetailScreen extends StatelessWidget {
         partyName: partyName,
         partyAddress: partyVillage,
         partyGstNo: partyGstNo,
+        kind: _kind,
         invoiceNo: (invoice['voucherNo'] ?? '').toString(),
         refNo: (invoice['refNo'] ?? '').toString(),
         date: _date,
@@ -79,12 +85,15 @@ class InvoiceDetailScreen extends StatelessWidget {
       final no = (invoice['voucherNo'] ?? 'bill')
           .toString()
           .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-      await Printing.sharePdf(bytes: bytes, filename: 'Invoice_$no.pdf');
+      final prefix =
+          _kind == TaxDocumentKind.creditNote ? 'CreditNote' : 'Invoice';
+      await Printing.sharePdf(bytes: bytes, filename: '${prefix}_$no.pdf');
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Could not build invoice: $e'),
+              content: Text(
+              'Could not build ${_kind == TaxDocumentKind.creditNote ? 'credit note' : 'invoice'}: $e'),
               backgroundColor: Colors.red),
         );
       }
@@ -94,13 +103,16 @@ class InvoiceDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final vNo = (invoice['voucherNo'] ?? '').toString();
-    final vType = (invoice['voucherType'] ?? 'Invoice').toString();
+    final isCredit = _kind == TaxDocumentKind.creditNote;
+    final vType =
+        (invoice['voucherType'] ?? (isCredit ? 'Credit Note' : 'Invoice'))
+            .toString();
     final charges = _chargeLedgers();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
       appBar: AppBar(
-        title: Text('Invoice #$vNo',
+        title: Text('${isCredit ? 'Credit Note' : 'Invoice'} #$vNo',
             style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
         backgroundColor: _green,
         foregroundColor: Colors.white,
@@ -174,19 +186,26 @@ class InvoiceDetailScreen extends StatelessWidget {
     );
   }
 
-  /// Credit ledgers minus the main goods/sales ledger (closest to taxable value).
+  /// Extra charge lines (hamali, freight, tax) — every ledger on the side
+  /// opposite the party, minus the main goods ledger, which is identified as the
+  /// one closest to the taxable value.
+  ///
+  /// The side matters: on a sales bill the party is debited so goods and charges
+  /// sit on Cr, but on a credit note the party is credited and they sit on Dr.
+  /// Taking Cr unconditionally would list the party's own posting as a charge.
   List<Map<String, dynamic>> _chargeLedgers() {
-    final crs = _ledgers.where((l) => l['type'] == 'Cr').toList();
-    Map<String, dynamic>? sales;
+    final side = _kind == TaxDocumentKind.creditNote ? 'Dr' : 'Cr';
+    final counter = _ledgers.where((l) => l['type'] == side).toList();
+    Map<String, dynamic>? goods;
     double best = double.infinity;
-    for (final l in crs) {
+    for (final l in counter) {
       final d = (((l['amount'] as num?)?.toDouble() ?? 0) - _taxable).abs();
       if (d < best) {
         best = d;
-        sales = l;
+        goods = l;
       }
     }
-    return crs.where((l) => !identical(l, sales)).toList();
+    return counter.where((l) => !identical(l, goods)).toList();
   }
 
   Widget _card({required Widget child, EdgeInsets? padding}) => Container(

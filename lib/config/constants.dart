@@ -129,7 +129,9 @@ class AppConstants {
 
   static const String sellerSeedLicence = 'LCSD0320220381YVT';
   static const String sellerSeedLicence2 = 'LCSD0620221190YVT';
-  static const String sellerFertilizerWholesaleLicence = 'LCFWD06202220263YVT';
+  // Read from the (sharper) credit-note print: LCFWD0620220263YVT.
+  // The tax-invoice photo was angled and appeared to carry an extra '2'.
+  static const String sellerFertilizerWholesaleLicence = 'LCFWD0620220263YVT';
   static const String sellerFertilizerRetailLicence = 'LCFRD0620222183YVT';
   // Kept for the delivery-memo model, which stores a single fertilizer licence.
   static const String sellerFertilizerLicence = sellerFertilizerWholesaleLicence;

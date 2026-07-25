@@ -726,22 +726,33 @@ def bucket_statements_invoices(led_rows, inv_rows, debtor_names, shop_names):
 
     # --- Invoices: for every SHOP LIST shop, the sales vouchers where the shop is
     # the debtor (Dr) AND the voucher has inventory. Join line items by MasterId. ---
+    # A voucher carrying stock is a SALE when the shop is debited and a CREDIT
+    # NOTE (sales return) when it is credited. Both are kept, tagged by docType,
+    # in the same subcollection — the app's Bills and Credit Note tabs filter on
+    # it. Receipts and payments never reach here: they carry no inventory, so the
+    # `mid in by_mid_inv` test already drops them.
     invoices = {}
     for name in shop_names:
-        sale_mids = {e['mid'] for e in by_ledger.get(name, [])
-                     if e['type'] == 'Dr' and e['mid'] in by_mid_inv}
-        if not sale_mids:
+        doc_mids = {}   # mid -> 'invoice' | 'credit_note'
+        for e in by_ledger.get(name, []):
+            if e['mid'] not in by_mid_inv:
+                continue
+            doc_mids[e['mid']] = 'invoice' if e['type'] == 'Dr' else 'credit_note'
+        if not doc_mids:
             continue
         bills = []
-        for mid in sale_mids:
+        for mid, doc_type in doc_mids.items():
             items = by_mid_inv.get(mid, [])
             ledgers = by_mid_led.get(mid, [])
             head = ledgers[0] if ledgers else (items[0] if items else None)
-            # Grand total = the shop's own debit in this voucher.
+            # Grand total = the shop's own posting on the side that defines this
+            # document — its debit on a sale, its credit on a return.
+            side = 'Dr' if doc_type == 'invoice' else 'Cr'
             total = sum(L['amount'] for L in ledgers
-                        if L['ledger'] == name and L['type'] == 'Dr')
+                        if L['ledger'] == name and L['type'] == side)
             bills.append({
                 'mid': mid,
+                'docType': doc_type,
                 'voucherNo': head['voucherNo'] if head else '',
                 'voucherType': head['voucherType'] if head else '',
                 'date': head['date'] if head else datetime.now(),
@@ -1406,6 +1417,9 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
             desired[inv_id] = {
                 'voucherNo': inv['voucherNo'],
                 'voucherType': inv['voucherType'],
+                # 'invoice' | 'credit_note'. Docs written before this field
+                # existed have no docType; the app treats that as 'invoice'.
+                'docType': inv.get('docType', 'invoice'),
                 'date': inv['date'],
                 'refNo': inv.get('refNo', ''),
                 'masterId': str(inv.get('mid', '')),

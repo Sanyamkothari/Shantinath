@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import 'package:shantinath_agro/services/ledger_statement_pdf_service.dart';
 import 'package:shantinath_agro/services/excel_export_service.dart';
 import 'package:shantinath_agro/screens/admin/invoice_detail_screen.dart';
+import 'package:shantinath_agro/services/invoice_pdf_service.dart';
 
 /// Admin drill-down for one Tally customer, reached from the Ledger Book.
 /// Two tabs: an account **Statement** (running balance, PDF/Excel) and **Bills**
@@ -60,7 +61,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F5F0),
         appBar: AppBar(
@@ -87,7 +88,11 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               fontWeight: FontWeight.w400,
               fontSize: 14,
             ),
-            tabs: const [Tab(text: 'Statement'), Tab(text: 'Bills')],
+            tabs: const [
+              Tab(text: 'Statement'),
+              Tab(text: 'Bills'),
+              Tab(text: 'Credit Notes'),
+            ],
           ),
         ),
         body: Column(
@@ -97,7 +102,8 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               child: TabBarView(
                 children: [
                   _StatementTab(state: this),
-                  _BillsTab(state: this),
+                  _BillsTab(state: this, kind: TaxDocumentKind.invoice),
+                  _BillsTab(state: this, kind: TaxDocumentKind.creditNote),
                 ],
               ),
             ),
@@ -400,35 +406,52 @@ class _StatementTab extends StatelessWidget {
 // Bills tab
 // ---------------------------------------------------------------------------
 
+/// Lists one kind of stock document for the party — sales bills, or credit
+/// notes (sales returns). Both live in the same `invoices` subcollection tagged
+/// with `docType`, so this filters client-side off a single stream rather than
+/// needing a second collection and a composite index.
 class _BillsTab extends StatelessWidget {
   final _PartyLedgerScreenState state;
-  const _BillsTab({required this.state});
+  final TaxDocumentKind kind;
+  const _BillsTab({required this.state, required this.kind});
+
+  bool _matches(Map<String, dynamic> d) =>
+      TaxDocumentKind.fromDocType(d['docType'] as String?) == kind;
 
   @override
   Widget build(BuildContext context) {
     final currency = state._currency;
+    final isCredit = kind == TaxDocumentKind.creditNote;
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: state._invoicesRef.orderBy('date', descending: true).snapshots(),
       builder: (context, snap) {
         if (snap.hasError) {
-          return _message(
-              Icons.error_outline_rounded, 'Could not load bills', '${snap.error}');
+          return _message(Icons.error_outline_rounded,
+              'Could not load ${isCredit ? 'credit notes' : 'bills'}',
+              '${snap.error}');
         }
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
               child:
                   CircularProgressIndicator(color: _PartyLedgerScreenState._green));
         }
-        final docs = snap.data?.docs ?? [];
+        final docs = (snap.data?.docs ?? [])
+            .map((d) => d.data())
+            .where(_matches)
+            .toList();
         if (docs.isEmpty) {
-          return _message(Icons.receipt_outlined, 'No bills yet',
-              'Sales invoices for this shop will appear here after the Tally sync.');
+          return _message(
+              isCredit ? Icons.assignment_return_outlined : Icons.receipt_outlined,
+              isCredit ? 'No credit notes yet' : 'No bills yet',
+              isCredit
+                  ? 'Sales returns for this shop will appear here after the Tally sync.'
+                  : 'Sales invoices for this shop will appear here after the Tally sync.');
         }
         return ListView.separated(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
           itemCount: docs.length,
           separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (_, i) => _billCard(context, docs[i].data(), currency),
+          itemBuilder: (_, i) => _billCard(context, docs[i], currency),
         );
       },
     );
@@ -439,6 +462,12 @@ class _BillsTab extends StatelessWidget {
     final date = _asDate(inv['date']);
     final total = (inv['total'] as num?)?.toDouble() ?? 0.0;
     final nItems = (inv['items'] as List?)?.length ?? 0;
+    final isCredit = kind == TaxDocumentKind.creditNote;
+    // Credit notes move money back to the customer, so they read in the same
+    // red the Ledger Book uses for a debit balance rather than the sales green.
+    final accent = isCredit
+        ? _PartyLedgerScreenState._drRed
+        : _PartyLedgerScreenState._green;
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -460,18 +489,24 @@ class _BillsTab extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: _PartyLedgerScreenState._green.withValues(alpha: 0.1),
+                color: accent.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.receipt_long_rounded,
-                  color: _PartyLedgerScreenState._green, size: 22),
+              child: Icon(
+                  isCredit
+                      ? Icons.assignment_return_rounded
+                      : Icons.receipt_long_rounded,
+                  color: accent,
+                  size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${inv['voucherType'] ?? 'Invoice'}  #${inv['voucherNo'] ?? ''}',
+                  Text(
+                      '${inv['voucherType'] ?? (isCredit ? 'Credit Note' : 'Invoice')}'
+                      '  #${inv['voucherNo'] ?? ''}',
                       style: GoogleFonts.outfit(
                           fontSize: 14, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 2),
@@ -489,7 +524,7 @@ class _BillsTab extends StatelessWidget {
                     style: GoogleFonts.outfit(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF1B1B1B))),
+                        color: isCredit ? accent : const Color(0xFF1B1B1B))),
                 const SizedBox(height: 2),
                 Icon(Icons.chevron_right_rounded,
                     color: Colors.grey.shade400, size: 20),

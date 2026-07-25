@@ -27,12 +27,15 @@ void main() {
   /// Pulls the drawable text out of a PDF so we can assert what actually got
   /// painted. A fixed-size Page silently clips overflow — it does not throw —
   /// so "the build succeeded" proves nothing about the last line item.
+  ///
+  /// dart_pdf emits every word as its own positioned `[(word)]TJ` operator, so
+  /// the raw stream never contains a multi-word phrase. Extract the literals and
+  /// re-join them with single spaces, which is what makes `contains('TAX
+  /// INVOICE')` meaningful.
   String drawnText(List<int> bytes) {
-    final raw = Uint8List.fromList(bytes);
+    final s = latin1.decode(Uint8List.fromList(bytes), allowInvalid: true);
     final out = BytesBuilder();
-    final pattern = RegExp(r'stream\r?\n', multiLine: true);
-    final s = latin1.decode(raw, allowInvalid: true);
-    for (final m in pattern.allMatches(s)) {
+    for (final m in RegExp(r'stream\r?\n', multiLine: true).allMatches(s)) {
       final end = s.indexOf('endstream', m.end);
       if (end < 0) continue;
       try {
@@ -41,14 +44,20 @@ void main() {
         // not a deflated stream; ignore
       }
     }
-    return latin1
-        .decode(out.toBytes(), allowInvalid: true)
-        .replaceAll(RegExp(r'[^\x20-\x7e]'), '');
+    final content = latin1.decode(out.toBytes(), allowInvalid: true);
+
+    final words = RegExp(r'\(((?:\\.|[^()\\])*)\)\s*Tj|\[\((.*?)\)\]\s*TJ')
+        .allMatches(content)
+        .map((m) => (m.group(1) ?? m.group(2) ?? '').replaceAll(r'\', ''))
+        .where((w) => w.isNotEmpty);
+    return words.join(' ');
   }
 
-  Future<Uint8List> render(int itemCount, String outName) async {
+  Future<Uint8List> render(int itemCount, String outName,
+      {TaxDocumentKind kind = TaxDocumentKind.invoice}) async {
     final bytes = await InvoicePdfService().build(
       partyName: 'MEGHAVAT KRISHI KENDRA KANDHRI',
+      kind: kind,
       invoiceNo: 'HS-947',
       refNo: '200',
       date: DateTime(2026, 5, 24),
@@ -88,4 +97,45 @@ void main() {
   test('a 40-line invoice keeps every item (paginates, never clips)', () async {
     await expectComplete(40, 'invoice_40', '3,00,000.00');
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  group('credit note', () {
+    test('uses the credit-note heading, label and closing note', () async {
+      final text = drawnText(
+          await render(5, 'creditnote_5', kind: TaxDocumentKind.creditNote));
+
+      expect(text, contains('CREDITNOTE'));
+      expect(text, contains('Credit Note No.'));
+      expect(text, contains('This is a Computer Generated Document'));
+
+      // The firm's credit note omits Place of Supply; the tax invoice keeps it.
+      expect(text, isNot(contains('Place of Supply')));
+      expect(text, contains('State Name'));
+    });
+
+    test('the tax invoice keeps what the credit note drops', () async {
+      final text = drawnText(await render(5, 'invoice_5'));
+
+      expect(text, contains('TAX INVOICE'));
+      expect(text, contains('Invoice No.'));
+      expect(text, contains('This is a Computer Generated Invoice'));
+      expect(text, contains('Place of Supply'));
+      expect(text, isNot(contains('CREDITNOTE')));
+    });
+
+    test('still renders every line item', () async {
+      await expectComplete(30, 'creditnote_30', '2,25,000.00');
+    }, timeout: const Timeout(Duration(minutes: 2)));
+  });
+
+  test('docType maps to the right document kind', () {
+    expect(TaxDocumentKind.fromDocType('credit_note'),
+        TaxDocumentKind.creditNote);
+    expect(TaxDocumentKind.fromDocType('invoice'), TaxDocumentKind.invoice);
+    // Docs synced before docType existed, or with an unexpected value, must not
+    // silently print as credit notes.
+    expect(TaxDocumentKind.fromDocType(null), TaxDocumentKind.invoice);
+    expect(TaxDocumentKind.fromDocType(''), TaxDocumentKind.invoice);
+    expect(TaxDocumentKind.fromDocType('something_else'),
+        TaxDocumentKind.invoice);
+  });
 }
