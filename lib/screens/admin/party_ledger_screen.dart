@@ -69,11 +69,23 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
               style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
-          bottom: const TabBar(
+          // The global tabBarTheme is tuned for tabs on a light surface
+          // (labelColor: primaryGreen), which renders green-on-green here.
+          // Override to white like every other TabBar sitting on the AppBar.
+          bottom: TabBar(
             indicatorColor: Colors.white,
             indicatorWeight: 3,
-            labelStyle: TextStyle(fontWeight: FontWeight.w700),
-            tabs: [Tab(text: 'Statement'), Tab(text: 'Bills')],
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white60,
+            labelStyle: GoogleFonts.outfit(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+            unselectedLabelStyle: GoogleFonts.outfit(
+              fontWeight: FontWeight.w400,
+              fontSize: 14,
+            ),
+            tabs: const [Tab(text: 'Statement'), Tab(text: 'Bills')],
           ),
         ),
         body: Column(
