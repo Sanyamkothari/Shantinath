@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:shantinath_agro/services/ledger_statement_pdf_service.dart';
 import 'package:shantinath_agro/services/excel_export_service.dart';
 import 'package:shantinath_agro/screens/admin/invoice_detail_screen.dart';
 import 'package:shantinath_agro/services/invoice_pdf_service.dart';
+import 'package:shantinath_agro/utils/pdf_helper.dart';
+
+import 'package:shantinath_agro/widgets/tally_last_updated_header.dart';
 
 /// Admin drill-down for one Tally customer, reached from the Ledger Book.
 /// Two tabs: an account **Statement** (running balance, PDF/Excel) and **Bills**
@@ -97,6 +99,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
         ),
         body: Column(
           children: [
+            const TallyLastUpdatedHeader(),
             _headerCard(),
             Expanded(
               child: TabBarView(
@@ -187,7 +190,7 @@ class _PartyLedgerScreenState extends State<PartyLedgerScreen> {
         balanceType: widget.balanceType,
         entries: entries,
       );
-      await Printing.sharePdf(
+      await shareOrDownloadPdf(
         bytes: bytes,
         filename:
             'Statement_${widget.ledgerName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.pdf',

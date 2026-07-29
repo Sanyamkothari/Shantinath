@@ -89,7 +89,7 @@ class ProductProvider extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   ProductProvider() {
-    loadProducts();
+    Future.microtask(() => loadProducts());
   }
 
   /// Load all products from the service.

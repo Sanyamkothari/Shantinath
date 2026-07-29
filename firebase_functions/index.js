@@ -40,15 +40,21 @@ const OTP_RATE_LIMITS = 'otp_rate_limits';
 // endpoint is metered per number and per caller IP before MessageCentral is
 // ever contacted.
 const SEND_LIMITS = [
-  { scope: 'phone', windowMs: 15 * 60 * 1000, max: 3 },
-  { scope: 'phone', windowMs: 24 * 60 * 60 * 1000, max: 10 },
-  { scope: 'ip', windowMs: 60 * 60 * 1000, max: 20 },
+  { scope: 'phone', windowMs: 15 * 60 * 1000, max: 10 },
+  { scope: 'phone', windowMs: 24 * 60 * 60 * 1000, max: 50 },
+  { scope: 'ip', windowMs: 60 * 60 * 1000, max: 100 },
 ];
 
 /** Returns the configured MessageCentral auth token. */
 function getMcToken() {
-  const token = MC_AUTH_TOKEN.value();
+  let token = process.env.MC_AUTH_TOKEN;
+  if (!token && typeof MC_AUTH_TOKEN !== 'undefined') {
+    try {
+      token = MC_AUTH_TOKEN.value();
+    } catch (_) {}
+  }
   if (!token) {
+    logger.error('MC_AUTH_TOKEN secret is not configured.');
     throw new Error('MC_AUTH_TOKEN secret is not configured.');
   }
   return token;
@@ -127,7 +133,11 @@ exports.sendOtp = onRequest(
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { phone } = req.body || {};
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (_) {}
+    }
+    const { phone } = body || {};
     if (typeof phone !== 'string' || phone.length !== 10 || !/^\d{10}$/.test(phone)) {
       return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
     }
@@ -215,7 +225,11 @@ exports.verifyOtp = onRequest(
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { phone, verificationId, otp } = req.body || {};
+    let body = req.body || {};
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (_) {}
+    }
+    const { phone, verificationId, otp } = body || {};
     if (typeof phone !== 'string' || !/^\d{10}$/.test(phone)) {
       return res.status(400).json({ error: 'Valid 10-digit phone number is required' });
     }

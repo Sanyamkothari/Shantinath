@@ -234,5 +234,11 @@ service cloud.firestore {
       allow read, write: if isAuthenticated() &&
         (isAdmin() || hasPerm('createDeliveryMemo'));
     }
+
+    // Application Metadata (e.g. Tally sync status)
+    match /app_metadata/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Admin SDK only
+    }
   }
 }

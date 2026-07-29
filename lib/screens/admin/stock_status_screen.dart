@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:shantinath_agro/widgets/tally_last_updated_header.dart';
+
 /// Read-only view of current Tally stock levels (from the `tally_stock`
 /// collection, populated by the Tally sync). This is a status screen only —
 /// it does NOT affect the products catalog, availability, or ordering.
@@ -44,6 +46,7 @@ class _StockStatusScreenState extends State<StockStatusScreen> {
       ),
       body: Column(
         children: [
+          const TallyLastUpdatedHeader(),
           _searchBar(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(

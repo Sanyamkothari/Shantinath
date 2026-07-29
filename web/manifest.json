@@ -1,13 +1,18 @@
 {
-    "name": "shantinath_agro",
-    "short_name": "shantinath_agro",
+    "name": "Shantinath Agro Agency",
+    "short_name": "Shantinath Agro",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F5F5F0",
+    "theme_color": "#2E7D32",
+    "description": "Quality Seeds & Fertilizers for Better Yield — Order online from Shantinath Agro Agency",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "categories": ["business", "shopping"],
+    "lang": "en",
+    "dir": "ltr",
+    "scope": ".",
+    "id": "/",
     "icons": [
         {
             "src": "icons/Icon-192.png",
@@ -30,6 +35,15 @@
             "sizes": "512x512",
             "type": "image/png",
             "purpose": "maskable"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Shantinath Agro Agency"
         }
     ]
 }

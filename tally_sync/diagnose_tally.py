@@ -1183,8 +1183,11 @@ def probe_hsn_batch(requests, url, company, days=90, raw_dump=False):
 
     # (label, TDL expression). Ordered most- to least-likely.
     candidates = [
+        ('hsn',   '$GSTHSNCode:StockItem:$StockItemName'),
+        ('hsn',   '$GSTItemHSNCodeEx'),
         ('hsn',   '$GSTHSNCode'),
         ('hsn',   '$HSNCode'),
+        ('hsn',   '$HSNCode:GSTDetails:[Last]'),
         ('hsn',   '$$StockItemHSN:$StockItemName'),
         ('hsn',   '$GSTDetails'),
         ('batch', '$BatchName'),
@@ -1258,6 +1261,70 @@ def probe_hsn_batch(requests, url, company, days=90, raw_dump=False):
         print("  No candidate worked. HSN/Batch may not be set on these stock items,")
         print("  or this Tally exposes them under a different method — check a stock")
         print("  item's GST Details in Tally before extending the TDL.")
+
+    # ── Stock-item-master-level HSN probe ──
+    # HSN lives in GSTDETAILS.LIST on the Stock Item master, not on voucher
+    # inventory entries. Probe the Stock Item collection directly.
+    if 'hsn' not in winners:
+        print("\n  ── Stock Item master HSN probe (GSTDETAILS.LIST) ──")
+        stk_candidates = [
+            '$$CollectionField:$HSNCode:1:GSTDetails',
+            '$HSNCode:GSTDetails:[Last]',
+            '$GSTHSNCode',
+            '$HSNCode',
+        ]
+
+        def stk_payload(expr):
+            return (
+                '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>'
+                '<TYPE>Data</TYPE><ID>StnProbeStk</ID></HEADER><BODY><DESC><STATICVARIABLES>'
+                '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>'
+                f'{comp}</STATICVARIABLES><TDL><TDLMESSAGE>'
+                '<REPORT NAME="StnProbeStk"><FORMS>PSF</FORMS></REPORT>'
+                '<FORM NAME="PSF"><PARTS>PSP</PARTS></FORM>'
+                '<PART NAME="PSP"><TOPLINES>PSL</TOPLINES><REPEAT>PSL : PSC</REPEAT>'
+                '<SCROLLED>Vertical</SCROLLED></PART>'
+                '<LINE NAME="PSL"><FIELDS>PItem,PVal</FIELDS></LINE>'
+                '<FIELD NAME="PItem"><SET>$Name</SET></FIELD>'
+                f'<FIELD NAME="PVal"><SET>{expr}</SET></FIELD>'
+                '<COLLECTION NAME="PSC"><TYPE>Stock Item</TYPE>'
+                '<FETCH>GSTDetails</FETCH></COLLECTION>'
+                '</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+            )
+
+        for expr in stk_candidates:
+            try:
+                r = requests.post(url, data=stk_payload(expr), headers=headers, timeout=60)
+                r.raise_for_status()
+                raw = r.content.decode('utf-8', errors='ignore')
+            except Exception as e:
+                print(f"    ❌ {expr:55} request failed ({type(e).__name__})")
+                continue
+
+            if '<LINEERROR>' in raw.upper() or 'Unknown' in raw[:400]:
+                print(f"    ❌ {expr:55} rejected by Tally")
+                continue
+
+            vals = [v.strip() for v in re.findall(r'<PVAL>(.*?)</PVAL>', raw, re.DOTALL)]
+            items = [v.strip() for v in re.findall(r'<PITEM>(.*?)</PITEM>', raw, re.DOTALL)]
+            filled = [v for v in vals if v]
+            if not vals:
+                print(f"    ⚠️  {expr:55} no rows returned")
+            elif not filled:
+                print(f"    ⚠️  {expr:55} {len(vals)} rows, ALL EMPTY")
+            else:
+                pct = 100 * len(filled) / len(vals)
+                sample = ', '.join(f"{i}={v}" for i, v in list(zip(items, vals))[:3] if v)
+                print(f"    ✅ {expr:55} {len(filled)}/{len(vals)} filled ({pct:.0f}%)")
+                print(f"       e.g. {sample[:110]}")
+                if 'hsn' not in winners:
+                    winners['hsn'] = f"(stock item master) {expr}"
+                break  # Found a working expression, no need to test more
+
+        if 'hsn' in winners and '(stock item master)' in winners['hsn']:
+            print("\n    HSN found on Stock Item masters — tally_sync.py fetches it from")
+            print("    get_stock_items_xml() and injects into invoice items via lookup.")
+
     return winners
 
 

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:shantinath_agro/utils/pdf_helper.dart';
 
 /// Renders a sales report to an A4 PDF: summary tiles plus top products,
 /// customers, and cities. The caller supplies pre-aggregated rows so the
@@ -166,6 +167,6 @@ class SalesReportPdfService {
 
   /// Share/print helper.
   Future<void> shareBytes(Uint8List bytes, String filename) {
-    return Printing.sharePdf(bytes: bytes, filename: filename);
+    return shareOrDownloadPdf(bytes: bytes, filename: filename);
   }
 }

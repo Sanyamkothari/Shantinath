@@ -8,7 +8,9 @@ import 'package:shantinath_agro/providers/locale_provider.dart';
 import 'package:shantinath_agro/services/excel_export_service.dart';
 import 'package:shantinath_agro/services/ledger_statement_pdf_service.dart';
 import 'package:shantinath_agro/utils/date_range_sheet.dart';
-import 'package:printing/printing.dart';
+import 'package:shantinath_agro/utils/pdf_helper.dart';
+
+import 'package:shantinath_agro/widgets/tally_last_updated_header.dart';
 
 class LedgerReportScreen extends StatefulWidget {
   const LedgerReportScreen({super.key});
@@ -68,7 +70,7 @@ class _LedgerReportScreenState extends State<LedgerReportScreen> {
       entries: entries,
       range: _dateRange,
     );
-    await Printing.sharePdf(
+    await shareOrDownloadPdf(
       bytes: bytes,
       filename: 'Statement_${title.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.pdf',
     );
@@ -223,6 +225,7 @@ class _LedgerReportScreenState extends State<LedgerReportScreen> {
           ),
           body: Column(
             children: [
+              TallyLastUpdatedHeader(fallbackTimestamp: userWithFinancials.lastTallySync),
               // Header summary card
               _buildSummaryCard(context, userWithFinancials, isMarathi),
 

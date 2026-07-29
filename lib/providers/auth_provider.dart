@@ -399,6 +399,16 @@ class AuthProvider extends ChangeNotifier {
     return raw;
   }
 
+  /// Check whether a phone number is already registered in the system.
+  /// Used by the login screen to avoid burning OTP credits for unregistered numbers.
+  /// Admin phones are always considered registered (they auto-bootstrap on first login).
+  Future<bool> isPhoneRegistered(String phone) async {
+    final trimmed = phone.trim();
+    // Admin phones auto-create their profile on first login, so always allow.
+    if (AppConstants.adminPhones.contains(trimmed)) return true;
+    return await _authService.isPhoneRegistered(trimmed);
+  }
+
   /// Fetch all synced Tally parties for registration lookup.
   Future<List<Map<String, dynamic>>> getTallyParties() async {
     return await _authService.getTallyParties();

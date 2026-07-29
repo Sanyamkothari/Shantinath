@@ -16,7 +16,7 @@ class BannerProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   BannerProvider() {
-    loadBanners();
+    Future.microtask(() => loadBanners());
   }
 
   Future<void> loadBanners() async {

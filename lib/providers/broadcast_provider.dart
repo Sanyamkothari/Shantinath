@@ -21,7 +21,7 @@ class BroadcastProvider extends ChangeNotifier {
 
   BroadcastProvider() {
     _loadLastViewedTime();
-    loadBroadcasts();
+    Future.microtask(() => loadBroadcasts());
   }
 
   /// Computes number of notifications created after the user's last notification list visit.

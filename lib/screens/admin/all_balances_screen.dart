@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shantinath_agro/screens/admin/party_ledger_screen.dart';
 
+import 'package:shantinath_agro/widgets/tally_last_updated_header.dart';
+
 /// Admin "Ledger Book" — shows the outstanding Dr/Cr balance of every customer
 /// synced from Tally, regardless of whether they have registered on the app.
 ///
@@ -50,6 +52,7 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
       ),
       body: Column(
         children: [
+          const TallyLastUpdatedHeader(),
           _buildSearchBar(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(

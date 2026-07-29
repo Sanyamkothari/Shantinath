@@ -57,6 +57,70 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final authProvider = context.read<AuthProvider>();
+
+      // ── Step 1: Check if the number is registered before sending OTP ──
+      final isRegistered = await authProvider.isPhoneRegistered(phone);
+      if (!mounted) return;
+
+      if (!isRegistered) {
+        setState(() => _isLoading = false);
+        // Show "not registered" dialog
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Icon(Icons.person_off_rounded, color: Colors.orange.shade700, size: 28),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Not Registered',
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              'This phone number is not registered. Please use the "Register here" option below the login button to create your account first.',
+              style: TextStyle(
+                color: Colors.grey.shade700,
+                fontSize: 15,
+                height: 1.4,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(
+                  'OK',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).pushNamed(AppRoutes.register);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Register Now'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // ── Step 2: Number is registered — send OTP ──
       final success = await authProvider.sendOtp(phone);
 
       if (!mounted) return;
@@ -88,13 +152,8 @@ class _LoginScreenState extends State<LoginScreen>
 
         if (!mounted) return;
 
-        if (verified == true) {
-          if (authProvider.isLoggedIn) {
-            Navigator.of(context).pushReplacementNamed(AppRoutes.home);
-          } else {
-            // OTP is verified, but customer is not registered. Go to registration screen.
-            Navigator.of(context).pushNamed(AppRoutes.register, arguments: phone);
-          }
+        if (verified == true && authProvider.isLoggedIn) {
+          Navigator.of(context).pushReplacementNamed(AppRoutes.home);
         }
       } else {
         throw Exception(authProvider.errorMessage ?? 'Failed to send OTP code');

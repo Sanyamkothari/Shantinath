@@ -523,7 +523,7 @@ def get_bulk_inventory_xml(company, from_str, to_str):
         '<LINE NAME="BIV"><FIELDS>BHdr</FIELDS><EXPLODE>BIEP</EXPLODE></LINE>'
         '<FIELD NAME="BHdr"><SET>$VoucherNumber</SET></FIELD>'
         '<PART NAME="BIEP"><TOPLINES>BIE</TOPLINES><REPEAT>BIE : AllInventoryEntries</REPEAT><SCROLLED>Vertical</SCROLLED></PART>'
-        '<LINE NAME="BIE"><FIELDS>BNo,BDate,BItem,BQty,BAQty,BRate,BAmt,BMid</FIELDS></LINE>'
+        '<LINE NAME="BIE"><FIELDS>BNo,BDate,BItem,BQty,BAQty,BRate,BAmt,BMid,BBatch,BHSN</FIELDS></LINE>'
         '<FIELD NAME="BNo"><SET>$VoucherNumber</SET></FIELD>'
         '<FIELD NAME="BDate"><SET>$Date</SET></FIELD>'
         '<FIELD NAME="BItem"><SET>$StockItemName</SET></FIELD>'
@@ -532,7 +532,9 @@ def get_bulk_inventory_xml(company, from_str, to_str):
         '<FIELD NAME="BRate"><SET>$Rate</SET></FIELD>'
         '<FIELD NAME="BAmt"><SET>$Amount</SET></FIELD>'
         '<FIELD NAME="BMid"><SET>$MasterId</SET></FIELD>'
-        '<COLLECTION NAME="BIC"><TYPE>Voucher</TYPE><FETCH>AllInventoryEntries</FETCH>'
+        '<FIELD NAME="BBatch"><SET>$BatchName</SET></FIELD>'
+        '<FIELD NAME="BHSN"><SET>$GSTHSNCode:StockItem:$StockItemName</SET></FIELD>'
+        '<COLLECTION NAME="BIC"><TYPE>Voucher</TYPE><FETCH>AllInventoryEntries,AllInventoryEntries.BatchAllocations</FETCH>'
         '<FILTER>FBulkCancel,FBulkOpt</FILTER></COLLECTION>'
         '<SYSTEM TYPE="Formulae" NAME="FBulkCancel">NOT $IsCancelled</SYSTEM>'
         '<SYSTEM TYPE="Formulae" NAME="FBulkOpt">NOT $IsOptional</SYSTEM>'
@@ -572,6 +574,14 @@ def parse_bulk_ledgers(raw):
     return rows
 
 
+def _clean_hsn(raw):
+    """Strips Tally's '&#4; Not Found' placeholder and control characters."""
+    v = re.sub('[\x00-\x1f]', '', (raw or '')).strip()
+    if 'Not Found' in v:
+        return ''
+    return v
+
+
 def parse_bulk_inventory(raw):
     """Parses the bulk inventory EXPLODE into rows:
     {mid, voucherNo, date, item, qty, unit, rate, amount}."""
@@ -583,6 +593,8 @@ def parse_bulk_inventory(raw):
     rates = re.findall(r'<BRATE>(.*?)</BRATE>', raw, re.DOTALL)
     amts = re.findall(r'<BAMT>(.*?)</BAMT>', raw, re.DOTALL)
     mids = re.findall(r'<BMID>(.*?)</BMID>', raw, re.DOTALL)
+    batches = re.findall(r'<BBATCH>(.*?)</BBATCH>', raw, re.DOTALL)
+    hsns = re.findall(r'<BHSN>(.*?)</BHSN>', raw, re.DOTALL)
     rows = []
     for i in range(len(items)):
         qv, qu = parse_quantity(qtys[i]) if i < len(qtys) else (0.0, '')
@@ -598,6 +610,8 @@ def parse_bulk_inventory(raw):
             'qty': qv, 'unit': qu,
             'rate': abs(_parse_signed_amount(rates[i])) if i < len(rates) else 0.0,
             'amount': abs(_parse_signed_amount(amts[i])) if i < len(amts) else 0.0,
+            'batch': batches[i].strip() if i < len(batches) else '',
+            'hsn': _clean_hsn(hsns[i]) if i < len(hsns) else '',
         })
     return rows
 
@@ -805,7 +819,7 @@ def get_stock_items_xml(company_name=None):
             <SCROLLED>Vertical</SCROLLED>
           </PART>
           <LINE NAME="StkLine">
-            <LEFTFIELDS>StkNameF, StkParentF, StkQtyF, StkValF, StkUnitF</LEFTFIELDS>
+            <LEFTFIELDS>StkNameF, StkParentF, StkQtyF, StkValF, StkUnitF, StkHSNF</LEFTFIELDS>
           </LINE>
           <FIELD NAME="StkNameF">
             <SET>$Name</SET>
@@ -822,8 +836,12 @@ def get_stock_items_xml(company_name=None):
           <FIELD NAME="StkUnitF">
             <SET>$BaseUnits</SET>
           </FIELD>
+          <FIELD NAME="StkHSNF">
+            <SET>$$CollectionField:$HSNCode:1:GSTDetails</SET>
+          </FIELD>
           <COLLECTION NAME="StkColl">
             <TYPE>Stock Item</TYPE>
+            <FETCH>GSTDetails</FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -1050,6 +1068,7 @@ def fetch_stock_items_from_tally(tally_url, company_name=None):
     qtys = re.findall(r'<STKQTYF>(.*?)</STKQTYF>', raw)
     vals = re.findall(r'<STKVALF>(.*?)</STKVALF>', raw)
     units = re.findall(r'<STKUNITF>(.*?)</STKUNITF>', raw)
+    hsns = re.findall(r'<STKHSNF>(.*?)</STKHSNF>', raw)
 
     items = []
     for i in range(len(names)):
@@ -1073,9 +1092,13 @@ def fetch_stock_items_from_tally(tally_url, company_name=None):
             'quantity': quantity,
             'unit': unit,
             'value': value,
+            'hsn': _clean_hsn(hsns[i]) if i < len(hsns) else '',
         })
 
     print(f"  Fetched {len(items)} stock items from Tally.")
+    hsn_filled = sum(1 for it in items if it['hsn'])
+    if hsn_filled:
+        print(f"  HSN codes found on {hsn_filled}/{len(items)} stock items.")
     return items
 
 
@@ -1605,6 +1628,17 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
                             body = f"New sales invoice #{vch_no} raised for ₹{amount:,.2f}."
                             send_push_notification(fcm_token, title, body)
 
+    if not dry_run:
+        try:
+            db.collection('app_metadata').document('tally_sync').set({
+                'lastSyncedAt': firestore.SERVER_TIMESTAMP,
+                'stockCount': len(stock_items),
+                'shopCount': len(shop_ledgers),
+                'invoiceCount': len(invoices),
+            }, merge=True)
+        except Exception as e:
+            print(f"  Warning: Could not update app_metadata sync timestamp: {e}")
+
     print(f"\n{'='*50}")
     print(f"Sync complete. Matched and updated {matched_count} of {len(debtor_ledgers)} debtor ledgers.")
     print(f"Shop names in registration lookup: {len(shop_ledgers)}")
@@ -1727,6 +1761,23 @@ def main():
 
     # 4. Fetch stock items (for the admin Stock Status view)
     stock_items = fetch_stock_items_from_tally(args.tally_url, company)
+
+    # 4.5 Build HSN lookup from stock item masters and inject into invoices.
+    # The bulk inventory EXPLODE can't reliably cross-reference the Stock Item
+    # master's GSTDETAILS, so we look it up from the master fetch above.
+    hsn_lookup = {it['name']: it['hsn'] for it in stock_items if it.get('hsn')}
+    if hsn_lookup and invoices:
+        patched = 0
+        for bills in invoices.values():
+            for bill in bills:
+                for item in bill.get('items', []):
+                    master_hsn = hsn_lookup.get(item.get('item', ''), '')
+                    cur = item.get('hsn', '')
+                    if master_hsn and (not cur or 'Not Found' in cur or '\x04' in cur):
+                        item['hsn'] = master_hsn
+                        patched += 1
+        if patched:
+            print(f"  ✔ Injected HSN codes from stock item masters into {patched} invoice line(s).")
 
     # 5. Sync to Firebase
     sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, args.service_account,

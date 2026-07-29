@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:shantinath_agro/services/invoice_pdf_service.dart';
+import 'package:shantinath_agro/utils/pdf_helper.dart';
 
 /// Shows one sales invoice (bill) in full — line items + charges + total — with
 /// Download / Send actions. Data is the synced `tally_ledgers/{id}/invoices` doc.
@@ -26,14 +27,22 @@ class InvoiceDetailScreen extends StatelessWidget {
 
   final _currency = const _Cur();
 
+  static double _num(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is num) return val.toDouble();
+    if (val is String) {
+      final clean = val.replaceAll(RegExp(r'[^0-9.-]'), '');
+      return double.tryParse(clean) ?? 0.0;
+    }
+    return 0.0;
+  }
+
   DateTime get _date {
     final d = invoice['date'];
+    if (d is Timestamp) return d.toDate();
     if (d is DateTime) return d;
-    try {
-      return (d as dynamic).toDate() as DateTime;
-    } catch (_) {
-      return DateTime.now();
-    }
+    if (d is String) return DateTime.tryParse(d) ?? DateTime.now();
+    return DateTime.now();
   }
 
   List<Map<String, dynamic>> get _items =>
@@ -51,8 +60,8 @@ class InvoiceDetailScreen extends StatelessWidget {
   TaxDocumentKind get _kind =>
       TaxDocumentKind.fromDocType(invoice['docType'] as String?);
 
-  double get _taxable => (invoice['taxableValue'] as num?)?.toDouble() ?? 0.0;
-  double get _total => (invoice['total'] as num?)?.toDouble() ?? 0.0;
+  double get _taxable => _num(invoice['taxableValue']);
+  double get _total => _num(invoice['total']);
 
   /// Synced line items mapped to the PDF's row model. `hsn` and `batch` stay
   /// empty until the Tally sync backfills them; the columns render blank rather
@@ -62,10 +71,10 @@ class InvoiceDetailScreen extends StatelessWidget {
             description: (it['item'] ?? '').toString(),
             batch: (it['batch'] ?? '').toString(),
             hsn: (it['hsn'] ?? '').toString(),
-            qty: (it['qty'] as num?)?.toDouble() ?? 0,
+            qty: _num(it['qty']),
             unit: (it['unit'] ?? '').toString(),
-            rate: (it['rate'] as num?)?.toDouble() ?? 0,
-            amount: (it['amount'] as num?)?.toDouble() ?? 0,
+            rate: _num(it['rate']),
+            amount: _num(it['amount']),
           ))
       .toList();
 
@@ -87,7 +96,7 @@ class InvoiceDetailScreen extends StatelessWidget {
           .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
       final prefix =
           _kind == TaxDocumentKind.creditNote ? 'CreditNote' : 'Invoice';
-      await Printing.sharePdf(bytes: bytes, filename: '${prefix}_$no.pdf');
+      await shareOrDownloadPdf(bytes: bytes, filename: '${prefix}_$no.pdf');
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -168,7 +177,7 @@ class InvoiceDetailScreen extends StatelessWidget {
                 _totalRow('Taxable value', _currency.f(_taxable)),
                 for (final c in charges)
                   _totalRow((c['ledger'] ?? 'Charge').toString(),
-                      _currency.f((c['amount'] as num?)?.toDouble() ?? 0)),
+                      _currency.f(_num(c['amount']))),
                 const Divider(),
                 _totalRow('Grand Total', _currency.f(_total), bold: true),
               ],
@@ -199,7 +208,7 @@ class InvoiceDetailScreen extends StatelessWidget {
     Map<String, dynamic>? goods;
     double best = double.infinity;
     for (final l in counter) {
-      final d = (((l['amount'] as num?)?.toDouble() ?? 0) - _taxable).abs();
+      final d = (_num(l['amount']) - _taxable).abs();
       if (d < best) {
         best = d;
         goods = l;
@@ -254,9 +263,9 @@ class InvoiceDetailScreen extends StatelessWidget {
       );
 
   Widget _itemRow(Map<String, dynamic> it) {
-    final qty = (it['qty'] as num?)?.toDouble() ?? 0;
-    final rate = (it['rate'] as num?)?.toDouble() ?? 0;
-    final amount = (it['amount'] as num?)?.toDouble() ?? 0;
+    final qty = _num(it['qty']);
+    final rate = _num(it['rate']);
+    final amount = _num(it['amount']);
     final unit = (it['unit'] ?? '').toString();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
