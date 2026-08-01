@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shantinath_agro/providers/cart_provider.dart';
-import 'package:shantinath_agro/config/routes.dart';
+import 'package:shantinath_agro/providers/tab_navigation_provider.dart';
 
 class CartBadge extends StatelessWidget {
   final VoidCallback? onTap;
@@ -17,9 +17,12 @@ class CartBadge extends StatelessWidget {
       alignment: Alignment.center,
       children: [
         IconButton(
-          icon: const Icon(Icons.shopping_cart_outlined),
+          icon: const Icon(
+            Icons.shopping_cart_outlined,
+            color: Colors.white,
+          ),
           onPressed: onTap ?? () {
-            Navigator.pushNamed(context, AppRoutes.cart);
+            context.read<TabNavigationProvider>().navigateToTab(context, 2);
           },
         ),
         if (count > 0)

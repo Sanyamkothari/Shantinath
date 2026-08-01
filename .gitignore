@@ -32,6 +32,11 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+# The root /build/ pattern above is anchored, so Gradle's own output dirs need
+# listing separately or they show up as untracked noise.
+android/build/
+android/app/build/
+android/.gradle/
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +48,31 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets & customer PII — never commit or bundle these
+# Firebase Admin SDK private key lives only on the Tally PC.
+service-account.json
+**/service-account.json
+_private/
+*.xlsx
+*.pdf
+
+# Firebase Functions secrets (managed via Secret Manager)
+firebase_functions/.env
+firebase_functions/.env.*
+
+# Cloud Functions dependencies (installed via npm)
+firebase_functions/node_modules/
+
+# Android release signing — NEVER commit these.
+# The keystore itself lives OUTSIDE this repo (see android/key.properties) so it
+# cannot be added even by accident; these patterns are a second line of defence.
+# Losing the keystore or its password means you can never publish an update to
+# this app again — back both up somewhere durable.
+android/key.properties
+key.properties
+*.jks
+*.keystore
+
+# Local Claude Code settings
+.claude/settings.local.json

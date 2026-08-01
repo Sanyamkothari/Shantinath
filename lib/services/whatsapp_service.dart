@@ -13,7 +13,7 @@ class WhatsAppService {
   static Future<void> shareOrderViaWhatsApp(Order order) async {
     final message = _formatOrderMessage(order);
     final encodedMessage = Uri.encodeComponent(message);
-    final cleanPhone = AppConstants.adminPhone.replaceAll('+', '').replaceAll(' ', '').trim();
+    final cleanPhone = AppConstants.businessContactPhone.replaceAll('+', '').replaceAll(' ', '').trim();
     final formattedPhone = cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
     final whatsappUrl =
         'https://wa.me/$formattedPhone?text=$encodedMessage';
@@ -74,6 +74,19 @@ class WhatsAppService {
         '${i + 1}. ${item.product.name} (${item.product.packSize}) '
         'x${item.quantity} - ₹$itemTotal',
       );
+      if (item.confirmedQuantity > 0 || item.deliveredQuantity > 0) {
+        final List<String> details = [];
+        if (item.deliveredQuantity > 0) {
+          details.add('Delivered: ${item.deliveredQuantity}');
+        }
+        if (item.confirmedQuantity > 0) {
+          details.add('Confirmed: ${item.confirmedQuantity}');
+        }
+        if (item.pendingQuantity > 0) {
+          details.add('Pending: ${item.pendingQuantity}');
+        }
+        buffer.writeln('   └─ (${details.join(', ')})');
+      }
     }
 
     buffer.writeln('');
@@ -85,7 +98,7 @@ class WhatsAppService {
     }
 
     buffer.writeln('');
-    buffer.writeln('Status: ${order.status.name.toUpperCase()}');
+    buffer.writeln('Status: ${order.getStatusText().toUpperCase()}');
     buffer.writeln('---');
     buffer.writeln('शांतिनाथ एग्रो एजेंसी');
 

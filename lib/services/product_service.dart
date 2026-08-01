@@ -13,53 +13,17 @@ class ProductService {
   ProductService._internal();
 
   /// Returns all products from Firestore.
-  /// Automatically seeds the Firestore database if it is empty.
+  ///
+  /// NOTE: This intentionally does NOT seed the catalog. Seeding writes to the
+  /// `products` collection, which Firestore rules restrict to admins
+  /// (`allow write: if isAdmin()`); doing it here as a side-effect of a read
+  /// would throw `permission-denied` for every customer that opens a fresh
+  /// (empty) database. The catalog is seeded explicitly by an admin via
+  /// [syncDefaultCatalog] (Admin dashboard → Sync default catalog).
   Future<List<Product>> getAllProducts() async {
     final snapshot = await _productsRef.get();
-    bool needsReSeed = false;
-    
-    if (snapshot.docs.isEmpty) {
-      needsReSeed = true;
-    } else {
-      // Check if any product is using the old schema (lacking companyCity/isFeatured/minOrder/packWeight) or old image URLs
-      for (final doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>?;
-        final imageUrl = data?['imageUrl'] as String? ?? '';
-        if (data == null || 
-            !data.containsKey('companyCity') || 
-            !data.containsKey('isFeatured') || 
-            !data.containsKey('minOrder') || 
-            !data.containsKey('packWeight') || 
-            imageUrl.startsWith('http') || 
-            (imageUrl.isEmpty && doc.id != 'SP005')) {
-          needsReSeed = true;
-          break;
-        }
-      }
-    }
-    
-    if (needsReSeed) {
-      // Wipe existing products to prevent schema discrepancies
-      final batch = _db.batch();
-      for (final doc in snapshot.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
 
-      // Seed database with sample products
-      final samples = Product.getSampleProducts();
-      final seedBatch = _db.batch();
-      
-      for (final product in samples) {
-        final docRef = _productsRef.doc(product.id);
-        seedBatch.set(docRef, product.toJson());
-      }
-      
-      await seedBatch.commit();
-    }
-
-    final currentSnapshot = await _productsRef.orderBy('createdAt', descending: true).get();
-    return currentSnapshot.docs
+    return snapshot.docs
         .map((doc) => Product.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
   }
@@ -140,6 +104,21 @@ class ProductService {
     await _productsRef.doc(id).delete();
     return true;
   }
+
+  /// Overwrites and synchronizes all default local products to Firestore.
+  /// This ensures any changes to local catalog definitions are pushed to Firebase.
+  Future<void> syncDefaultCatalog() async {
+    final samples = Product.getSampleProducts();
+    final seedBatch = _db.batch();
+    
+    for (final product in samples) {
+      final docRef = _productsRef.doc(product.id);
+      seedBatch.set(docRef, product.toJson());
+    }
+    
+    await seedBatch.commit();
+  }
+
 
   /// Get all unique brands from Firestore.
   Future<List<String>> getUniqueBrands() async {

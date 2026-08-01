@@ -553,6 +553,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get jowar => 'Jowar';
 
   @override
+  String get chana => 'Chana';
+
+  @override
+  String get tilli => 'Tilli';
+
+  @override
+  String get jawari => 'Jawari';
+
+  @override
+  String get mung => 'Mung';
+
+  @override
   String get rupeeSymbol => '₹';
 
   @override

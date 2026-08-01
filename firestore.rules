@@ -1,0 +1,244 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // The authenticated user's number as a bare 10-digit string (document-id form).
+    // Firebase delivers it as "+91XXXXXXXXXX"; user/admin docs are keyed by the
+    // 10-digit number, so strip the country code before any lookup/compare.
+    function phone10() {
+      return request.auth.token.phone_number.replace('\\+91', '');
+    }
+
+    // Checks if the authenticated user owns the document whose ID is a phone number.
+    // Accepts both the 10-digit and +91-prefixed forms for safety.
+    function isOwner(phoneId) {
+      return isAuthenticated() &&
+        (request.auth.token.phone_number == '+91' + phoneId ||
+         request.auth.token.phone_number == phoneId ||
+         phone10() == phoneId);
+    }
+
+    // Checks if the authenticated user is registered as an admin in Firestore.
+    // Looks up the user document by the 10-digit id (matching how docs are keyed).
+    function isAdmin() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(phone10())) &&
+        get(/databases/$(database)/documents/users/$(phone10())).data.role == 'admin';
+    }
+
+    // Designated bootstrap admin numbers — must mirror AppConstants.adminPhones.
+    // These may self-provision their own admin profile on first login and are
+    // protected from deletion / privileged edits by other users.
+    function isBootstrapAdmin(phoneId) {
+      return phoneId in ['9422167400', '9422167401', '9421964383', '8669554684'];
+    }
+
+    // Gets the user data document for the current user
+    function me() {
+      return get(/databases/$(database)/documents/users/$(phone10())).data;
+    }
+
+    // Checks if the authenticated user has a specific permission or is an admin
+    function hasPerm(p) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/users/$(phone10()))
+        && (me().role == 'admin' || (me().get('permissions', []).hasAny([p])));
+    }
+
+    // True when an update does NOT attempt to change any privileged field.
+    // Privileged fields (role, approval, balances, permissions) may only be set by the Admin
+    // SDK (Tally sync) or an authorized staff/admin — never by the document owner.
+    function privilegedFieldsUnchanged() {
+      return request.resource.data.get('role', 'customer') == resource.data.get('role', 'customer') &&
+        request.resource.data.get('isApproved', false) == resource.data.get('isApproved', false) &&
+        request.resource.data.get('outstandingBalance', 0) == resource.data.get('outstandingBalance', 0) &&
+        request.resource.data.get('balanceType', 'Dr') == resource.data.get('balanceType', 'Dr') &&
+        request.resource.data.get('permissions', []) == resource.data.get('permissions', []);
+    }
+
+    // Users Collection
+    match /users/{phoneId} {
+      // A user can read their own profile; admins can read anyone; employees can read too if they have viewCustomerDirectory permission
+      allow read: if isAuthenticated() && (isOwner(phoneId) || isAdmin() || hasPerm('viewCustomerDirectory'));
+
+      // A user can create their own profile during registration, but cannot self-assign elevated roles.
+      // Admins and staff with manageEmployees permission can create employee docs (as long as they don't assign 'admin' role).
+      allow create: if isAuthenticated() && (
+        (isOwner(phoneId) && (
+          isBootstrapAdmin(phoneId) ||
+          (request.resource.data.get('role', 'customer') == 'customer' &&
+           request.resource.data.get('isApproved', false) == false &&
+           request.resource.data.get('permissions', []) == [])
+        )) ||
+        isAdmin() ||
+        (hasPerm('manageEmployees') && request.resource.data.get('role', 'customer') != 'admin')
+      );
+
+      // Owners may update their own non-privileged profile fields.
+      // Bootstrap admin is fully protected and can only be updated/deleted by themselves.
+      // Admins and managePermissions/manageEmployees holders can edit users (if not elevating to or modifying admins).
+      allow update: if isAuthenticated() && (
+        (isBootstrapAdmin(phoneId) && phone10() == phoneId) ||
+        (!isBootstrapAdmin(phoneId) && (
+          (isOwner(phoneId) && privilegedFieldsUnchanged()) ||
+          isAdmin() ||
+          hasPerm('managePermissions') ||
+          (hasPerm('manageEmployees') && resource.data.get('role', 'customer') != 'admin' && request.resource.data.get('role', 'customer') != 'admin')
+        ))
+      );
+
+      // Only an admin (or someone with manageEmployees) may delete a user profile (except the bootstrap admin).
+      allow delete: if !isBootstrapAdmin(phoneId) && (isAdmin() || hasPerm('manageEmployees'));
+    }
+
+    // Private financials subcollection
+    match /users/{phoneId}/private/financials {
+      // A user can read their own financials; admins/staff with viewCustomerBalances can read anyone.
+      allow read: if isAuthenticated() && (isOwner(phoneId) || isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Tally Parties Collection (lookup for registration)
+    match /tally_parties/{partyId} {
+      // Any authenticated user can read parties for registration lookup.
+      allow read: if isAuthenticated();
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Tally Ledgers Collection — outstanding Dr/Cr balance of EVERY customer in
+    // Tally (registered on the app or not). Admin-only view; contains financial
+    // data, so it must not be world-readable like tally_parties.
+    match /tally_ledgers/{ledgerId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Per-ledger account statement (written by the Tally Admin SDK sync).
+    // Powers the admin Ledger Book drill-down. The parent tally_ledgers rule
+    // does NOT cover this subcollection (rules aren't recursive), so it needs
+    // its own match or it defaults to deny.
+    match /tally_ledgers/{ledgerId}/transactions/{txnId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Per-shop invoices (written by the Tally Admin SDK sync). Powers the admin
+    // Ledger Book "Bills" tab. Same access as the parent balances/statements.
+    match /tally_ledgers/{ledgerId}/invoices/{invId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewCustomerBalances'));
+      // Only writeable via the Firebase Admin SDK (Tally sync).
+      allow write: if false;
+    }
+
+    // Per-user ledger transactions (written by the Tally Admin SDK sync).
+    match /users/{phoneId}/ledger_transactions/{txnId} {
+      allow read: if isAuthenticated() && (isOwner(phoneId) || isAdmin() || hasPerm('viewCustomerBalances'));
+      allow write: if false; // Admin SDK only
+    }
+
+    // Tally Stock Items — read-only inventory snapshot for the admin Stock
+    // Status screen. Written only by the Admin SDK (Tally sync).
+    match /tally_stock/{itemId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('manageProducts'));
+      allow write: if false;
+    }
+
+    // OTP verification sessions (verificationId -> phone binding) and the OTP
+    // send rate-limit counters. Written only by the sendOtp/verifyOtp Cloud
+    // Functions via the Admin SDK, which bypasses these rules. Readable by a
+    // client they must never be: the session doc is what stops one user from
+    // redeeming another user's verificationId.
+    match /otp_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /otp_rate_limits/{bucketId} {
+      allow read, write: if false;
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      // Catalog is public (including unauthenticated visitors).
+      allow read: if true;
+      // Only admins or staff with manageProducts can write products.
+      allow write: if isAdmin() || hasPerm('manageProducts');
+    }
+
+    // Promo banners & broadcasts
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isAdmin() || hasPerm('manageBanners');
+    }
+    match /broadcasts/{broadcastId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || hasPerm('manageBroadcasts');
+    }
+
+    // Activity Logs Collection (audit logs)
+    match /activity_logs/{logId} {
+      allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewAuditLogs'));
+      allow create: if isAuthenticated() && (request.resource.data.actorId == phone10() || request.resource.data.actorId == 'system');
+      allow update, delete: if false; // Append-only
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      // Users can read their own orders; admins/staff with manageOrders or viewCustomerDirectory can read all.
+      allow read: if isAuthenticated() &&
+        (resource.data.customerId == request.auth.token.phone_number ||
+         resource.data.customerId == phone10() ||
+         isAdmin() ||
+         hasPerm('manageOrders') ||
+         hasPerm('viewCustomerDirectory'));
+
+      // Users can create orders for themselves; staff with placeOrderForRetailer can create orders for anyone.
+      allow create: if isAuthenticated() &&
+        (request.resource.data.customerId == request.auth.token.phone_number ||
+         request.resource.data.customerId == phone10() ||
+         isAdmin() ||
+         hasPerm('placeOrderForRetailer'));
+
+      // Admins/staff with manageOrders can update or delete orders. Staff with
+      // createDeliveryMemo may also update: generating a memo advances the
+      // order's delivered quantities/status inside the same transaction.
+      allow update: if isAdmin() || hasPerm('manageOrders') || hasPerm('createDeliveryMemo');
+      allow delete: if isAdmin() || hasPerm('manageOrders');
+    }
+
+    // Delivery Memos — created/voided by admin or staff with createDeliveryMemo.
+    // A customer may read memos issued to them.
+    match /delivery_memos/{memoId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.customerId == phone10() ||
+         resource.data.customerId == request.auth.token.phone_number ||
+         isAdmin() ||
+         hasPerm('createDeliveryMemo') ||
+         hasPerm('manageOrders'));
+      // Create/update from the client transaction; memos are voided, not deleted.
+      allow create, update: if isAuthenticated() &&
+        (isAdmin() || hasPerm('createDeliveryMemo'));
+      allow delete: if false;
+    }
+
+    // Memo-number counters — incremented in the same transaction as memo creation.
+    match /counters/{counterId} {
+      allow read, write: if isAuthenticated() &&
+        (isAdmin() || hasPerm('createDeliveryMemo'));
+    }
+
+    // Application Metadata (e.g. Tally sync status)
+    match /app_metadata/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Admin SDK only
+    }
+  }
+}

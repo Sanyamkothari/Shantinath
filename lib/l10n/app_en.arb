@@ -197,6 +197,10 @@
   "mustard": "Mustard",
   "bajra": "Bajra",
   "jowar": "Jowar",
+  "chana": "Chana",
+  "tilli": "Tilli",
+  "jawari": "Jawari",
+  "mung": "Mung",
 
   "rupeeSymbol": "₹",
   "priceFormat": "₹{price}",

@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
+import 'package:shantinath_agro/widgets/otp_verification_sheet.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -31,6 +32,9 @@ class _RegisterScreenState extends State<RegisterScreen>
   String _customerType = 'retail'; // wholesale or retail
 
   bool _isLoading = false;
+  List<Map<String, dynamic>> _tallyParties = [];
+  bool _isLoadingParties = false;
+  bool _isManualFirmEntry = false;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnimation;
@@ -53,6 +57,69 @@ class _RegisterScreenState extends State<RegisterScreen>
       CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
     _animController.forward();
+    _fetchTallyParties();
+  }
+
+  Future<void> _fetchTallyParties() async {
+    setState(() => _isLoadingParties = true);
+    try {
+      final authProvider = context.read<AuthProvider>();
+      final parties = await authProvider.getTallyParties();
+      setState(() {
+        _tallyParties = parties;
+        _isLoadingParties = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingParties = false);
+    }
+  }
+
+  void _showPartySelectionSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(28),
+          topRight: Radius.circular(28),
+        ),
+      ),
+      builder: (context) {
+        return _PartySelectionBottomSheet(
+          parties: _tallyParties,
+          isLoading: _isLoadingParties,
+          onSelected: (party) {
+            setState(() {
+              _firmNameController.text = party['name'] as String? ?? '';
+              
+              final partyGst = party['gstNo'] as String? ?? '';
+              if (partyGst.isNotEmpty) {
+                _gstNoController.text = partyGst;
+              }
+              
+              final partyVillage = party['village'] as String? ?? '';
+              if (partyVillage.isNotEmpty) {
+                _villageController.text = partyVillage;
+              }
+              
+              final partyDistrict = party['district'] as String? ?? '';
+              if (partyDistrict.isNotEmpty) {
+                _districtController.text = partyDistrict;
+              }
+            });
+            Navigator.pop(context);
+          },
+          onManualEntry: () {
+            setState(() {
+              _isManualFirmEntry = true;
+              _firmNameController.clear();
+            });
+            Navigator.pop(context);
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -80,9 +147,23 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     try {
       final authProvider = context.read<AuthProvider>();
+      final phone = _phoneController.text.trim();
+
+      // Verify phone ownership via OTP before creating the account, unless this
+      // phone was already verified earlier in the session (e.g. the user came
+      // here from the login screen after a successful OTP check).
+      if (!authProvider.isPhoneVerified(phone)) {
+        final verified = await _verifyPhoneViaOtp(phone);
+        if (!mounted) return;
+        if (!verified) {
+          setState(() => _isLoading = false);
+          return;
+        }
+      }
+
       final success = await authProvider.register(
         name: _nameController.text.trim(),
-        phone: _phoneController.text.trim(),
+        phone: phone,
         village: _villageController.text.trim(),
         firmName: _firmNameController.text.trim(),
         seedLicenceNumber: _seedLicenceController.text.trim(),
@@ -121,9 +202,65 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
+  /// Sends an OTP to [phone] and shows the verification sheet.
+  /// Returns true only once the code has been successfully verified.
+  Future<bool> _verifyPhoneViaOtp(String phone) async {
+    final authProvider = context.read<AuthProvider>();
+
+    final sent = await authProvider.sendOtp(phone);
+    if (!mounted) return false;
+    if (!sent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(authProvider.errorMessage ?? 'Failed to send OTP code'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return false;
+    }
+
+    final verified = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(28),
+          topRight: Radius.circular(28),
+        ),
+      ),
+      builder: (_) => OtpVerificationSheet(
+        phone: phone,
+        onVerify: (otp) async {
+          final ok = await authProvider.verifyOtpAndLogin(phone, otp);
+          return ok
+              ? null
+              : (authProvider.errorMessage ??
+                  'Incorrect OTP code. Please try again.');
+        },
+        onResend: () => authProvider.sendOtp(phone),
+      ),
+    );
+
+    if (!mounted) return false;
+    return verified == true && authProvider.isPhoneVerified(phone);
+  }
+
+  bool _phonePreFilled = false;
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+
+    if (!_phonePreFilled) {
+      final verifiedPhone = ModalRoute.of(context)?.settings.arguments as String?;
+      if (verifiedPhone != null && verifiedPhone.isNotEmpty) {
+        _phoneController.text = verifiedPhone;
+        _phonePreFilled = true;
+      }
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F0),
@@ -219,7 +356,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
+                          color: Colors.black.withValues(alpha: 0.15),
                           blurRadius: 16,
                           spreadRadius: 2,
                         ),
@@ -289,26 +426,72 @@ class _RegisterScreenState extends State<RegisterScreen>
                 },
               ),
               const SizedBox(height: 16),
-              _buildTextField(
-                controller: _firmNameController,
-                label: 'Firm Name',
-                hint: 'Enter your firm name',
-                icon: Icons.business_rounded,
-                textCapitalization: TextCapitalization.words,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Firm name is required';
-                  }
-                  return null;
-                },
+              GestureDetector(
+                onTap: _isManualFirmEntry ? null : _showPartySelectionSheet,
+                child: AbsorbPointer(
+                  absorbing: !_isManualFirmEntry,
+                  child: _buildTextField(
+                    controller: _firmNameController,
+                    label: 'Firm Name',
+                    hint: _isManualFirmEntry ? 'Enter your firm name' : 'Tap to select your firm (Tally Party Name)',
+                    icon: Icons.business_rounded,
+                    textCapitalization: TextCapitalization.words,
+                    suffixIcon: _isManualFirmEntry
+                        ? IconButton(
+                            icon: const Icon(Icons.list_alt_rounded, color: Color(0xFF2E7D32)),
+                            tooltip: 'Select from list',
+                            onPressed: () {
+                              setState(() {
+                                _isManualFirmEntry = false;
+                                _firmNameController.clear();
+                              });
+                            },
+                          )
+                        : const Icon(Icons.arrow_drop_down_circle_outlined, color: Color(0xFF2E7D32)),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Firm name is required';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
               ),
+              if (!_isManualFirmEntry) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _isManualFirmEntry = true;
+                        _firmNameController.clear();
+                      });
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Text(
+                        'My firm is not listed (New Customer)',
+                        style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF2E7D32),
+                          decoration: TextDecoration.underline,
+                          decorationColor: const Color(0xFF2E7D32),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
-              _buildTextField(
+               _buildTextField(
                 controller: _phoneController,
                 label: 'Phone Number',
                 hint: 'Enter 10-digit phone number',
                 icon: Icons.phone_rounded,
                 keyboardType: TextInputType.phone,
+                enabled: !_phonePreFilled,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(10),
@@ -460,7 +643,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.02),
+                color: Colors.black.withValues(alpha: 0.02),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -569,6 +752,8 @@ class _RegisterScreenState extends State<RegisterScreen>
     List<TextInputFormatter>? inputFormatters,
     TextCapitalization textCapitalization = TextCapitalization.none,
     String? Function(String?)? validator,
+    bool enabled = true,
+    Widget? suffixIcon,
   }) {
     return TextFormField(
       controller: controller,
@@ -576,13 +761,15 @@ class _RegisterScreenState extends State<RegisterScreen>
       inputFormatters: inputFormatters,
       textCapitalization: textCapitalization,
       validator: validator,
+      enabled: enabled,
       style: const TextStyle(fontSize: 15),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon, color: const Color(0xFF2E7D32), size: 22),
+        suffixIcon: suffixIcon,
         filled: true,
-        fillColor: const Color(0xFFF5F5F0),
+        fillColor: enabled ? const Color(0xFFF5F5F0) : Colors.grey.shade200,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
@@ -590,6 +777,10 @@ class _RegisterScreenState extends State<RegisterScreen>
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(color: Colors.grey.shade200, width: 1.5),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -620,9 +811,9 @@ class _RegisterScreenState extends State<RegisterScreen>
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF2E7D32),
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF2E7D32).withOpacity(0.6),
+          disabledBackgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.6),
           elevation: 4,
-          shadowColor: const Color(0xFF2E7D32).withOpacity(0.4),
+          shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -669,6 +860,252 @@ class _RegisterScreenState extends State<RegisterScreen>
               color: const Color(0xFF2E7D32),
               decoration: TextDecoration.underline,
               decorationColor: const Color(0xFF2E7D32),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PartySelectionBottomSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> parties;
+  final bool isLoading;
+  final Function(Map<String, dynamic>) onSelected;
+  final VoidCallback onManualEntry;
+
+  const _PartySelectionBottomSheet({
+    required this.parties,
+    required this.isLoading,
+    required this.onSelected,
+    required this.onManualEntry,
+  });
+
+  @override
+  State<_PartySelectionBottomSheet> createState() =>
+      _PartySelectionBottomSheetState();
+}
+
+class _PartySelectionBottomSheetState
+    extends State<_PartySelectionBottomSheet> {
+  final _searchController = TextEditingController();
+  List<Map<String, dynamic>> _filteredParties = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredParties = widget.parties;
+    _searchController.addListener(_filterParties);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterParties() {
+    final query = _searchController.text.toLowerCase().trim();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredParties = widget.parties;
+      } else {
+        _filteredParties = widget.parties.where((party) {
+          final name = (party['name'] as String? ?? '').toLowerCase();
+          final village = (party['village'] as String? ?? '').toLowerCase();
+          final district = (party['district'] as String? ?? '').toLowerCase();
+          return name.contains(query) ||
+              village.contains(query) ||
+              district.contains(query);
+        }).toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: size.height * 0.8,
+      ),
+      padding: EdgeInsets.only(
+        top: 20,
+        left: 20,
+        right: 20,
+        bottom: bottomPadding + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Select Your Firm',
+            style: GoogleFonts.outfit(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF1B5E20),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Search and select the name registered in Tally',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _searchController,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: 'Search firm name, village or district...',
+              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF2E7D32)),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, color: Colors.grey),
+                      onPressed: () => _searchController.clear(),
+                    )
+                  : null,
+              filled: true,
+              fillColor: const Color(0xFFF5F5F0),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: widget.isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2E7D32)),
+                    ),
+                  )
+                : _filteredParties.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.separated(
+                        itemCount: _filteredParties.length,
+                        separatorBuilder: (_, index) => Divider(color: Colors.grey.shade100, height: 1),
+                        itemBuilder: (context, index) {
+                          final party = _filteredParties[index];
+                          final name = party['name'] as String? ?? 'Unknown Firm';
+                          final village = party['village'] as String? ?? '';
+                          final district = party['district'] as String? ?? '';
+                          
+                          String sub = '';
+                          if (village.isNotEmpty && district.isNotEmpty) {
+                            sub = '$village, $district';
+                          } else {
+                            sub = village.isNotEmpty ? village : district;
+                          }
+
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            title: Text(
+                              name,
+                              style: GoogleFonts.outfit(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey.shade800,
+                              ),
+                            ),
+                            subtitle: sub.isNotEmpty
+                                ? Row(
+                                    children: [
+                                      const Icon(Icons.location_on_rounded, size: 12, color: Colors.grey),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        sub,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : null,
+                            trailing: const Icon(
+                              Icons.chevron_right_rounded,
+                              color: Color(0xFF2E7D32),
+                            ),
+                            onTap: () => widget.onSelected(party),
+                          );
+                        },
+                      ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: widget.onManualEntry,
+              icon: const Icon(Icons.add_business_rounded),
+              label: Text(
+                'My Firm is Not Listed (New Customer)',
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.search_off_rounded,
+          size: 64,
+          color: Colors.grey.shade400,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'No matching firm found',
+          style: GoogleFonts.outfit(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            'Check spelling or tap the button below to register as a new customer.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade500,
             ),
           ),
         ),

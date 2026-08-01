@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
 import 'package:shantinath_agro/models/user_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -86,7 +88,7 @@ class ProfileScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.02),
+                      color: Colors.black.withValues(alpha: 0.02),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -145,8 +147,39 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              // Business Profile card (if customer)
+              // Outstanding Balance Card (if customer)
               if (user.isCustomer) ...[
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(user.phone)
+                      .collection('private')
+                      .doc('financials')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    double outstandingBalance = 0.0;
+                    String balanceType = 'Dr';
+                    DateTime? lastTallySync;
+                    if (snapshot.hasData && snapshot.data!.exists) {
+                      final data = snapshot.data!.data() as Map<String, dynamic>?;
+                      if (data != null) {
+                        outstandingBalance = (data['outstandingBalance'] as num?)?.toDouble() ?? 0.0;
+                        balanceType = data['balanceType'] as String? ?? 'Dr';
+                        final timestamp = data['lastTallySync'] as Timestamp?;
+                        if (timestamp != null) {
+                          lastTallySync = timestamp.toDate();
+                        }
+                      }
+                    }
+                    final userWithFinancials = user.copyWith(
+                      outstandingBalance: outstandingBalance,
+                      balanceType: balanceType,
+                      lastTallySync: lastTallySync,
+                    );
+                    return _buildOutstandingBalanceCard(context, userWithFinancials, isMarathi);
+                  },
+                ),
+                const SizedBox(height: 24),
                 _buildBusinessDetailsCard(context, user, isMarathi),
                 const SizedBox(height: 24),
               ],
@@ -181,18 +214,18 @@ class ProfileScreen extends StatelessWidget {
                             onChanged: (_) {
                               localeProvider.toggleLocale();
                             },
-                            activeColor: const Color(0xFF2E7D32),
+                            activeThumbColor: const Color(0xFF2E7D32),
                           ),
                         ],
                       ),
                     ),
                     const Divider(height: 1),
-                    // Admin Panel button (only if user is admin)
-                    if (authProvider.isAdmin) ...[
+                    // Staff Panel button (if user is admin or employee)
+                    if (authProvider.isStaff) ...[
                       ListTile(
-                        leading: const Icon(Icons.admin_panel_settings_outlined, color: Color(0xFFFF8F00)),
+                        leading: const Icon(Icons.admin_panel_settings_outlined, color: Color(0xFF2E7D32)),
                         title: Text(
-                          isMarathi ? 'ॲडमीन पॅनेल' : 'Admin Panel',
+                          isMarathi ? 'स्टाफ पॅनेल' : 'Staff Panel',
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         trailing: const Icon(Icons.chevron_right_rounded),
@@ -281,7 +314,7 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _buildBusinessDetailsCard(BuildContext context, UserModel user, bool isMarathi) {
-    Widget _buildDetailRow(String label, String value, IconData icon) {
+    Widget buildDetailRow(String label, String value, IconData icon) {
       if (value.isEmpty) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -327,7 +360,7 @@ class ProfileScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -352,17 +385,17 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'फर्मचे नाव' : 'Firm Name',
             user.firmName,
             Icons.storefront_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'मालकाचे नाव' : 'Proprietor Name',
             user.proprietorName,
             Icons.assignment_ind_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'ग्राहक प्रकार' : 'Customer Type',
             user.customerType.isEmpty 
                 ? '' 
@@ -371,40 +404,180 @@ class ProfileScreen extends StatelessWidget {
                     : (isMarathi ? 'किरकोळ विक्रेता (Retailer)' : 'Retailer')),
             Icons.badge_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'तालुका' : 'Taluka',
             user.taluka,
             Icons.map_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'जिल्हा' : 'District',
             user.district,
             Icons.my_location_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'जीएसटी क्रमांक' : 'GST Number',
             user.gstNo,
             Icons.percent_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'बियाणे परवाना क्रमांक' : 'Seed License Number',
             user.seedLicenceNumber,
             Icons.receipt_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'खत परवाना क्रमांक' : 'Fertilizer License Number',
             user.fertilizerLicenceNumber,
             Icons.science_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? '२ रा परवाना क्रमांक' : '2nd License Number',
             user.secondLicenceNumber,
             Icons.description_rounded,
           ),
-          _buildDetailRow(
+          buildDetailRow(
             isMarathi ? 'खात आयडी क्रमांक' : 'Khat ID Number',
             user.khatIdNo,
             Icons.tag_rounded,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOutstandingBalanceCard(BuildContext context, UserModel user, bool isMarathi) {
+    final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ', decimalDigits: 2);
+    final String balStr = currencyFormat.format(user.outstandingBalance);
+    final String typeText = user.balanceType == 'Dr'
+        ? (isMarathi ? 'येणे (Debit)' : 'Debit (Owed)')
+        : (isMarathi ? 'जमा (Credit)' : 'Credit (Advance)');
+    
+    final syncTimeStr = user.lastTallySync != null
+        ? DateFormat('dd MMM yyyy, hh:mm a').format(user.lastTallySync!)
+        : (isMarathi ? 'कधीही नाही' : 'Never');
+
+    final balanceColor = user.balanceType == 'Dr' ? const Color(0xFFC62828) : const Color(0xFF2E7D32);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.shade100, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF2E7D32), size: 24),
+              const SizedBox(width: 10),
+              Text(
+                isMarathi ? 'टॅली खाते शिल्लक' : 'Tally Account Balance',
+                style: GoogleFonts.outfit(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF1B5E20),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isMarathi ? 'थकीत रक्कम (Outstanding)' : 'Current Outstanding',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade500,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    balStr,
+                    style: GoogleFonts.outfit(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: balanceColor,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: balanceColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  typeText,
+                  style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    color: balanceColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.sync_rounded, size: 14, color: Colors.grey.shade400),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isMarathi
+                      ? 'टॅली सिंक वेळ: $syncTimeStr'
+                      : 'Last Tally Sync: $syncTimeStr',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pushNamed(context, AppRoutes.ledgerReport);
+              },
+              icon: const Icon(Icons.receipt_long_rounded, color: Colors.white, size: 18),
+              label: Text(
+                isMarathi ? 'खाते उतारा (लेजर) पहा' : 'View Account Statement',
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: Colors.white,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+            ),
           ),
         ],
       ),

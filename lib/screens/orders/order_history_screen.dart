@@ -5,6 +5,7 @@ import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
+import 'package:shantinath_agro/providers/locale_provider.dart';
 import 'package:shantinath_agro/models/user_model.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
@@ -42,6 +43,10 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return const Color(0xFF2E7D32);
       case OrderStatus.cancelled:
         return Colors.red.shade600;
+      case OrderStatus.partiallyConfirmed:
+        return const Color(0xFF0288D1);
+      case OrderStatus.partiallyDelivered:
+        return const Color(0xFF43A047);
     }
   }
 
@@ -55,20 +60,17 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         return Icons.check_circle_rounded;
       case OrderStatus.cancelled:
         return Icons.cancel_rounded;
+      case OrderStatus.partiallyConfirmed:
+        return Icons.verified_user_rounded;
+      case OrderStatus.partiallyDelivered:
+        return Icons.local_shipping_rounded;
     }
   }
 
   String _getStatusLabel(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pending:
-        return 'Pending';
-      case OrderStatus.confirmed:
-        return 'Confirmed';
-      case OrderStatus.delivered:
-        return 'Delivered';
-      case OrderStatus.cancelled:
-        return 'Cancelled';
-    }
+    final isMarathi =
+        Provider.of<LocaleProvider>(context, listen: false).isMarathi;
+    return status.localizedLabel(isMarathi);
   }
 
   @override
@@ -135,7 +137,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7D32).withOpacity(0.08),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -164,7 +166,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withOpacity(0.06),
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -218,7 +220,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -230,7 +232,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
             Container(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
               decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.04),
+                color: statusColor.withValues(alpha: 0.04),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -253,7 +255,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.12),
+                      color: statusColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(

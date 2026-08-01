@@ -8,6 +8,8 @@ import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
 import 'package:shantinath_agro/models/cart_item.dart';
 import 'package:shantinath_agro/widgets/product_image.dart';
+import 'package:shantinath_agro/models/user_model.dart';
+import 'package:shantinath_agro/widgets/retailer_picker_sheet.dart';
 
 class CartScreen extends StatefulWidget {
   final bool isTab;
@@ -20,6 +22,7 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   final _notesController = TextEditingController();
+  UserModel? _selectedRetailer;
 
   @override
   void dispose() {
@@ -146,6 +149,24 @@ class _CartScreenState extends State<CartScreen> {
 
     if (cartProvider.items.isEmpty) return;
 
+    final canOrderOnBehalf = authProvider.can('placeOrderForRetailer');
+
+    if (canOrderOnBehalf && _selectedRetailer == null) {
+      final picked = await showModalBottomSheet<UserModel>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => const RetailerPickerSheet(),
+      );
+      if (picked == null) {
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _selectedRetailer = picked;
+      });
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -167,6 +188,30 @@ class _CartScreenState extends State<CartScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (canOrderOnBehalf && _selectedRetailer != null) ...[
+              Text(
+                isMarathi
+                    ? 'किरकोळ विक्रेता (ऑर्डरचे लाभार्थी):'
+                    : 'Ordering on behalf of:',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _selectedRetailer!.firmName.isNotEmpty
+                    ? '${_selectedRetailer!.firmName} (${_selectedRetailer!.name})'
+                    : _selectedRetailer!.name,
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: const Color(0xFF2E7D32),
+                ),
+              ),
+              Text(
+                '${_selectedRetailer!.village}, ${_selectedRetailer!.phone}',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+            ],
             Text(
               isMarathi
                   ? 'तुम्ही खालील वस्तूंसाठी ऑर्डर नोंदवत आहात:'
@@ -177,7 +222,7 @@ class _CartScreenState extends State<CartScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withOpacity(0.06),
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -226,13 +271,20 @@ class _CartScreenState extends State<CartScreen> {
 
     try {
       final user = authProvider.currentUser!;
+      final customerId = canOrderOnBehalf && _selectedRetailer != null ? _selectedRetailer!.id : user.id;
+      final customerName = canOrderOnBehalf && _selectedRetailer != null ? _selectedRetailer!.name : user.name;
+      final customerPhone = canOrderOnBehalf && _selectedRetailer != null ? _selectedRetailer!.phone : user.phone;
+      final customerVillage = canOrderOnBehalf && _selectedRetailer != null ? _selectedRetailer!.village : user.village;
+
       final placedOrder = await orderProvider.placeOrder(
-        customerId: user.id,
-        customerName: user.name,
-        customerPhone: user.phone,
-        customerVillage: user.village,
+        customerId: customerId,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        customerVillage: customerVillage,
         items: cartProvider.items,
         notes: _notesController.text.trim(),
+        placedById: canOrderOnBehalf ? user.phone : '',
+        placedByName: canOrderOnBehalf ? user.name : '',
       );
 
       if (placedOrder == null) {
@@ -241,6 +293,9 @@ class _CartScreenState extends State<CartScreen> {
 
       cartProvider.clearCart();
       _notesController.clear();
+      setState(() {
+        _selectedRetailer = null;
+      });
 
       if (!mounted) return;
 
@@ -332,7 +387,7 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Future<void> _showClearCartDialog(BuildContext context) async {
+  Future<void> _showClearCartDialog() async {
     final isMarathi = Provider.of<LocaleProvider>(context, listen: false).isMarathi;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -380,20 +435,20 @@ class _CartScreenState extends State<CartScreen> {
       ),
     );
 
-    if (confirmed == true && mounted) {
-      context.read<CartProvider>().clearCart();
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isMarathi ? 'कार्ट रिकामे केले गेले' : 'Cart cleared',
-          ),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          duration: const Duration(seconds: 2),
+    if (confirmed != true || !mounted) return;
+
+    context.read<CartProvider>().clearCart();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          isMarathi ? 'कार्ट रिकामे केले गेले' : 'Cart cleared',
         ),
-      );
-    }
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -416,7 +471,7 @@ class _CartScreenState extends State<CartScreen> {
                 if (cartProvider.items.isNotEmpty)
                   IconButton(
                     icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
-                    onPressed: () => _showClearCartDialog(context),
+                    onPressed: () => _showClearCartDialog(),
                     tooltip: isMarathi ? 'कार्ट रिकामे करा' : 'Clear Cart',
                   ),
               ],
@@ -436,6 +491,7 @@ class _CartScreenState extends State<CartScreen> {
                   children: [
                     ...cartProvider.items.map((item) => _buildCartItem(item)),
                     const SizedBox(height: 12),
+                    _buildRetailerSelector(),
                     _buildNotesField(),
                     const SizedBox(height: 100),
                   ],
@@ -470,7 +526,7 @@ class _CartScreenState extends State<CartScreen> {
             const Spacer(),
             if (cartProvider.items.isNotEmpty)
               TextButton.icon(
-                onPressed: () => _showClearCartDialog(context),
+                onPressed: () => _showClearCartDialog(),
                 icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: Colors.redAccent),
                 label: Text(
                   isMarathi ? 'रिकामे करा' : 'Clear',
@@ -485,7 +541,7 @@ class _CartScreenState extends State<CartScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7D32).withOpacity(0.08),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -514,7 +570,7 @@ class _CartScreenState extends State<CartScreen> {
               width: 120,
               height: 120,
               decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withOpacity(0.06),
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -594,7 +650,7 @@ class _CartScreenState extends State<CartScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -657,6 +713,7 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                   const SizedBox(height: 8),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       // Quantity controls
                       Container(
@@ -707,14 +764,20 @@ class _CartScreenState extends State<CartScreen> {
                           ],
                         ),
                       ),
-                      const Spacer(),
                       // Subtotal
-                      Text(
-                        '₹${(item.product.price * item.quantity).toStringAsFixed(0)}',
-                        style: GoogleFonts.outfit(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFF1B5E20),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '₹${(item.product.price * item.quantity).toStringAsFixed(0)}',
+                            maxLines: 1,
+                            style: GoogleFonts.outfit(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF1B5E20),
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -750,7 +813,7 @@ class _CartScreenState extends State<CartScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -795,6 +858,144 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
+  Widget _buildRetailerSelector() {
+    final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (!authProvider.can('placeOrderForRetailer')) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.people_alt_rounded, size: 18, color: Color(0xFF2E7D32)),
+              const SizedBox(width: 8),
+              Text(
+                isMarathi ? 'किरकोळ विक्रेता (ऑर्डरचे लाभार्थी)' : 'Retailer (Order Beneficiary)',
+                style: GoogleFonts.outfit(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_selectedRetailer == null)
+            ElevatedButton.icon(
+              onPressed: () async {
+                final picked = await showModalBottomSheet<UserModel>(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (context) => const RetailerPickerSheet(),
+                );
+                if (picked != null) {
+                  setState(() {
+                    _selectedRetailer = picked;
+                  });
+                }
+              },
+              icon: const Icon(Icons.search_rounded),
+              label: Text(isMarathi ? 'किरकोळ विक्रेता निवडा' : 'Select Retailer'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.1),
+                foregroundColor: const Color(0xFF2E7D32),
+                elevation: 0,
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedRetailer!.firmName.isNotEmpty
+                            ? _selectedRetailer!.firmName
+                            : _selectedRetailer!.name,
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: const Color(0xFF1B5E20),
+                        ),
+                      ),
+                      if (_selectedRetailer!.firmName.isNotEmpty)
+                        Text(
+                          _selectedRetailer!.name,
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on_outlined, size: 14, color: Colors.grey[500]),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_selectedRetailer!.village}, ${_selectedRetailer!.taluka}',
+                            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                          ),
+                          const SizedBox(width: 10),
+                          Icon(Icons.phone_outlined, size: 14, color: Colors.grey[500]),
+                          const SizedBox(width: 4),
+                          Text(
+                            _selectedRetailer!.phone,
+                            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final picked = await showModalBottomSheet<UserModel>(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (context) => const RetailerPickerSheet(),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _selectedRetailer = picked;
+                      });
+                    }
+                  },
+                  child: Text(
+                    isMarathi ? 'बदला' : 'Change',
+                    style: const TextStyle(
+                      color: Color(0xFF2E7D32),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBottomBar(CartProvider cartProvider) {
     final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
     return Container(
@@ -803,7 +1004,7 @@ class _CartScreenState extends State<CartScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),
@@ -821,83 +1022,60 @@ class _CartScreenState extends State<CartScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isMarathi ? 'एकूण रक्कम' : 'Total Amount',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '₹${cartProvider.totalAmount.toStringAsFixed(0)}',
-                      style: GoogleFonts.outfit(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF1B5E20),
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    // WhatsApp share
-                    Container(
-                      width: 48,
-                      height: 48,
-                      margin: const EdgeInsets.only(right: 10),
-                      child: IconButton.filledTonal(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                isMarathi
-                                    ? 'ऑर्डर नोंदवल्यानंतर व्हॉट्सॲपवर शेअर करता येईल'
-                                    : 'WhatsApp share available after placing order',
-                              ),
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.share_rounded, size: 22),
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
-                          foregroundColor: const Color(0xFF25D366),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isMarathi ? 'एकूण रक्कम' : 'Total Amount',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade500,
                         ),
                       ),
-                    ),
-                    // Place order
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: _placeOrder,
-                        icon: const Icon(Icons.shopping_bag_rounded, size: 20),
-                        label: Text(
-                          isMarathi ? 'ऑर्डर नोंदवा' : 'Place Order',
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '₹${cartProvider.totalAmount.toStringAsFixed(0)}',
+                          maxLines: 1,
                           style: GoogleFonts.outfit(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          foregroundColor: Colors.white,
-                          elevation: 2,
-                          shadowColor: const Color(0xFF2E7D32).withOpacity(0.3),
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFF1B5E20),
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Place order (customers share via WhatsApp from the order
+                // detail screen after the order exists).
+                SizedBox(
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: _placeOrder,
+                    icon: const Icon(Icons.shopping_bag_rounded, size: 20),
+                    label: Text(
+                      isMarathi ? 'ऑर्डर नोंदवा' : 'Place Order',
+                      style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ],
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      elevation: 2,
+                      shadowColor: const Color(0xFF2E7D32).withValues(alpha: 0.3),
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/models/user_model.dart';
 import 'package:shantinath_agro/services/auth_service.dart';
+import 'package:shantinath_agro/services/activity_service.dart';
 
 /// ChangeNotifier provider for authentication state.
 /// Wraps [AuthService] and exposes reactive state for the UI.
@@ -13,6 +17,12 @@ class AuthProvider extends ChangeNotifier {
   UserModel? _currentUser;
   bool _isLoading = false;
   String? _errorMessage;
+
+  String? _verificationId;
+  bool _otpSent = false;
+  String? _otpVerifiedPhone;
+
+  StreamSubscription<DocumentSnapshot>? _userSubscription;
 
   // ---------------------------------------------------------------------------
   // Getters
@@ -30,72 +40,174 @@ class AuthProvider extends ChangeNotifier {
   /// Whether a user is currently logged in.
   bool get isLoggedIn => _currentUser != null;
 
+  /// Whether OTP was successfully dispatched to the device.
+  bool get otpSent => _otpSent;
+
+  /// Whether [phone] has completed OTP verification during this session.
+  /// Used to gate registration so an account can only be created for a phone
+  /// number whose ownership was proven via OTP.
+  bool isPhoneVerified(String phone) => _otpVerifiedPhone == phone.trim();
+
   /// Whether the current user has admin privileges.
   bool get isAdmin =>
       _currentUser != null && _currentUser!.role == UserRole.admin;
+
+  /// Whether the current user is an employee.
+  bool get isEmployee =>
+      _currentUser != null && _currentUser!.role == UserRole.employee;
+
+  /// Whether the current user is staff (admin or employee).
+  bool get isStaff =>
+      _currentUser != null && _currentUser!.isStaff;
+
+  /// Checks if the current user has a specific permission.
+  bool can(String key) =>
+      _currentUser != null && _currentUser!.hasPermission(key);
 
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
 
-  /// Try to restore user session from SharedPreferences.
+  /// Reset the OTP status variables.
+  void resetOtpStatus() {
+    _otpSent = false;
+    _verificationId = null;
+    notifyListeners();
+  }
+
+  /// Try to restore user session.
   Future<bool> tryAutoLogin() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final phone = prefs.getString(_phonePrefKey);
-      if (phone == null || phone.isEmpty) return false;
+      if (AppConstants.useMockOtp) {
+        final prefs = await SharedPreferences.getInstance();
+        final phone = prefs.getString(_phonePrefKey);
+        if (phone == null || phone.isEmpty) return false;
 
-      // Restoring Admin session
-      if (phone == AppConstants.adminPhone) {
-        _currentUser = const UserModel(
-          id: 'admin_001',
-          name: 'Shantinath Admin',
-          phone: AppConstants.adminPhone,
-          village: 'Head Office',
-          role: UserRole.admin,
-        );
-        notifyListeners();
-        return true;
-      }
+        final user = await _authService.getUserByPhone(phone);
+        if (user != null) {
+          _currentUser = user;
+          _listenToCurrentUser();
+          notifyListeners();
+          return true;
+        }
+        return false;
+      } else {
+        // Real Firebase Auth state check. We sign in with a custom token whose
+        // UID is the bare 10-digit phone number, so derive the phone from the
+        // UID (falling back to the phoneNumber claim for older sessions).
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser == null) return false;
 
-      // Restoring Customer session
-      final user = await _authService.getUserByPhone(phone);
-      if (user != null) {
-        _currentUser = user;
-        notifyListeners();
-        return true;
+        var phone = firebaseUser.uid;
+        if (phone.isEmpty) {
+          phone = firebaseUser.phoneNumber ?? '';
+        }
+        if (phone.isEmpty) return false;
+
+        // Strip country code (+91) to match the domestic phone format in the DB.
+        if (phone.startsWith('+91')) {
+          phone = phone.substring(3);
+        }
+
+        final user = await _authService.getUserByPhone(phone);
+        if (user != null) {
+          _currentUser = user;
+          _listenToCurrentUser();
+          notifyListeners();
+          return true;
+        }
+        return false;
       }
-      return false;
     } catch (e) {
       debugPrint('Auto login failed: $e');
       return false;
     }
   }
 
-  /// Login with [phone] and [password].
-  /// Sets [currentUser] on success, sets [errorMessage] on failure.
-  /// Returns true on success, false on failure.
-  Future<bool> login(String phone, String password) async {
+  /// Send OTP code to the specified [phone] number.
+  Future<bool> sendOtp(String phone) async {
     _setLoading(true);
     _clearError();
 
+    final completer = Completer<bool>();
+
+    await _authService.sendOtp(
+      phone: phone,
+      onCodeSent: (verificationId) {
+        _verificationId = verificationId;
+        _otpSent = true;
+        _setLoading(false);
+        completer.complete(true);
+      },
+      onError: (error) {
+        _setError(error);
+        _otpSent = false;
+        _setLoading(false);
+        completer.complete(false);
+      },
+    );
+
+    return completer.future;
+  }
+
+  /// Verify the OTP code [smsCode] and logs in.
+  /// Sets [currentUser] on success.
+  /// Returns true on success, false on verification/auth failure.
+  /// Note: Throws nothing. If user profile doesn't exist, successful OTP will still return true,
+  /// but [currentUser] will remain null, signaling to UI to redirect to Registration page.
+  Future<bool> verifyOtpAndLogin(String phone, String smsCode) async {
+    _setLoading(true);
+    _clearError();
+
+    if (_verificationId == null) {
+      _setError('Verification session expired. Please request a new OTP.');
+      _setLoading(false);
+      return false;
+    }
+
     try {
-      _currentUser = await _authService.login(phone, password);
+      _currentUser = await _authService.verifyOtpAndLogin(
+        phone: phone,
+        verificationId: _verificationId!,
+        smsCode: smsCode,
+      );
+
+      // OTP was valid (no exception thrown) — remember this phone is verified.
+      _otpVerifiedPhone = phone.trim();
+
       if (_currentUser != null) {
-        await _saveSession(_currentUser!.phone);
+        if (AppConstants.useMockOtp) {
+          await _saveSession(_currentUser!.phone);
+        }
+        _listenToCurrentUser();
+        // Log login action
+        ActivityService.log(
+          action: 'login',
+          summary: '${_currentUser!.name} (${_currentUser!.roleText}) logged in successfully.',
+          actor: _currentUser,
+        );
       }
       _setLoading(false);
       return true;
     } catch (e) {
-      _setError(_extractMessage(e));
+      final msg = _extractMessage(e);
+      if (msg == 'USER_NOT_REGISTERED') {
+        // OTP itself was valid; only the profile is missing. Mark the phone as
+        // verified so the registration screen can proceed to create the account.
+        _otpVerifiedPhone = phone.trim();
+        _setLoading(false);
+        // OTP was valid, but user document doesn't exist yet. We return success (true)
+        // to verify OTP passed, but keep currentUser null so screen can route to register.
+        return true;
+      }
+      _setError(msg);
       _setLoading(false);
       return false;
     }
   }
 
-  /// Register a new customer with [name], [phone], and [village].
-  /// Sets [currentUser] on success (auto-login after registration).
-  /// Returns true on success, false on failure.
+  /// Complete registration for a newly verified user.
+  /// Automatically sets the logged-in [currentUser].
   Future<bool> register({
     required String name,
     required String phone,
@@ -131,7 +243,10 @@ class AuthProvider extends ChangeNotifier {
         customerType: customerType,
       );
       if (_currentUser != null) {
-        await _saveSession(_currentUser!.phone);
+        if (AppConstants.useMockOtp) {
+          await _saveSession(_currentUser!.phone);
+        }
+        _listenToCurrentUser();
       }
       _setLoading(false);
       return true;
@@ -143,11 +258,90 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Logout the current user.
-  void logout() {
+  Future<void> logout() async {
+    if (_currentUser != null) {
+      ActivityService.log(
+        action: 'logout',
+        summary: '${_currentUser!.name} (${_currentUser!.roleText}) logged out.',
+        actor: _currentUser,
+      );
+    }
     _currentUser = null;
-    _clearSession();
+    await _userSubscription?.cancel();
+    _userSubscription = null;
+    _otpVerifiedPhone = null;
+    resetOtpStatus();
     _clearError();
+    if (AppConstants.useMockOtp) {
+      await _clearSession();
+    } else {
+      await FirebaseAuth.instance.signOut();
+    }
     notifyListeners();
+  }
+
+  /// Start listening reactively to changes on the current user's profile
+  void _listenToCurrentUser() {
+    _userSubscription?.cancel();
+    if (_currentUser == null) return;
+
+    _userSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(_currentUser!.phone)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (snapshot.exists && snapshot.data() != null) {
+          final updatedUser = UserModel.fromJson(snapshot.data() as Map<String, dynamic>);
+          _currentUser = updatedUser;
+          notifyListeners();
+        }
+      },
+      onError: (error) {
+        debugPrint('Error listening to user changes: $error');
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _userSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Refresh the current user's profile details.
+  Future<void> refreshCurrentUser() async {
+    if (_currentUser == null) return;
+    try {
+      final user = await _authService.getUserByPhone(_currentUser!.phone);
+      if (user != null) {
+        _currentUser = user;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Failed to refresh user: $e');
+    }
+  }
+
+  /// Update the FCM token for the currently authenticated user.
+  Future<void> updateFcmToken(String token) async {
+    if (_currentUser == null) return;
+    try {
+      await _authService.updateFcmToken(_currentUser!.phone, token);
+      _currentUser = _currentUser!.copyWith(fcmToken: token);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error updating FCM token in provider: $e');
+    }
+  }
+
+  /// Approve or reject a user (Admin action).
+  Future<void> approveUser(String phone, bool isApproved) async {
+    try {
+      await _authService.updateApprovalStatus(phone, isApproved);
+    } catch (e) {
+      throw Exception('Failed to update user approval: $e');
+    }
   }
 
   /// Clear any existing error message.
@@ -199,10 +393,24 @@ class AuthProvider extends ChangeNotifier {
   /// Extract a clean error message from an exception or error.
   String _extractMessage(Object e) {
     final raw = e.toString();
-    // Remove 'Exception: ' prefix if present
     if (raw.startsWith('Exception: ')) {
       return raw.substring(11);
     }
     return raw;
+  }
+
+  /// Check whether a phone number is already registered in the system.
+  /// Used by the login screen to avoid burning OTP credits for unregistered numbers.
+  /// Admin phones are always considered registered (they auto-bootstrap on first login).
+  Future<bool> isPhoneRegistered(String phone) async {
+    final trimmed = phone.trim();
+    // Admin phones auto-create their profile on first login, so always allow.
+    if (AppConstants.adminPhones.contains(trimmed)) return true;
+    return await _authService.isPhoneRegistered(trimmed);
+  }
+
+  /// Fetch all synced Tally parties for registration lookup.
+  Future<List<Map<String, dynamic>>> getTallyParties() async {
+    return await _authService.getTallyParties();
   }
 }

@@ -1,3 +1,4 @@
+import 'package:shantinath_agro/utils/error_helper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shantinath_agro/models/cart_item.dart';
 import 'package:shantinath_agro/models/order.dart';
@@ -25,17 +26,17 @@ class OrderProvider extends ChangeNotifier {
   /// The most recent error message, if any.
   String? get errorMessage => _errorMessage;
 
-  /// Count of pending orders.
+  /// Count of pending orders (includes partially confirmed & partially delivered).
   int get pendingCount =>
-      _orders.where((o) => o.status == OrderStatus.pending).length;
+      _orders.where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.partiallyConfirmed || o.status == OrderStatus.partiallyDelivered).length;
 
-  /// Count of confirmed orders.
+  /// Count of confirmed orders (includes partially confirmed).
   int get confirmedCount =>
-      _orders.where((o) => o.status == OrderStatus.confirmed).length;
+      _orders.where((o) => o.status == OrderStatus.confirmed || o.status == OrderStatus.partiallyConfirmed).length;
 
-  /// Count of delivered orders.
+  /// Count of delivered orders (includes partially delivered).
   int get deliveredCount =>
-      _orders.where((o) => o.status == OrderStatus.delivered).length;
+      _orders.where((o) => o.status == OrderStatus.delivered || o.status == OrderStatus.partiallyDelivered).length;
 
   /// Count of cancelled orders.
   int get cancelledCount =>
@@ -54,7 +55,7 @@ class OrderProvider extends ChangeNotifier {
     try {
       _orders = await _orderService.getOrdersByCustomer(customerId);
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -70,7 +71,7 @@ class OrderProvider extends ChangeNotifier {
     try {
       _orders = await _orderService.getAllOrders();
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -86,6 +87,8 @@ class OrderProvider extends ChangeNotifier {
     required String customerVillage,
     required List<CartItem> items,
     String notes = '',
+    String placedById = '',
+    String placedByName = '',
   }) async {
     if (items.isEmpty) {
       _errorMessage = 'Cannot place an order with no items';
@@ -112,6 +115,8 @@ class OrderProvider extends ChangeNotifier {
         status: OrderStatus.pending,
         notes: notes,
         createdAt: DateTime.now(),
+        placedById: placedById,
+        placedByName: placedByName,
       );
 
       final placedOrder = await _orderService.placeOrder(order);
@@ -123,7 +128,7 @@ class OrderProvider extends ChangeNotifier {
       notifyListeners();
       return placedOrder;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
       _isLoading = false;
       notifyListeners();
       return null;
@@ -132,14 +137,24 @@ class OrderProvider extends ChangeNotifier {
 
   /// Update the status of an order identified by [orderId].
   /// Returns true on success, false on failure.
-  Future<bool> updateOrderStatus(String orderId, OrderStatus status) async {
+  Future<bool> updateOrderStatus(
+    String orderId,
+    OrderStatus status, {
+    String lastModifiedById = '',
+    String lastModifiedByName = '',
+  }) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
       final updatedOrder =
-          await _orderService.updateOrderStatus(orderId, status);
+          await _orderService.updateOrderStatus(
+            orderId,
+            status,
+            lastModifiedById: lastModifiedById,
+            lastModifiedByName: lastModifiedByName,
+          );
 
       // Update in local list
       final index = _orders.indexWhere((o) => o.id == orderId);
@@ -151,7 +166,47 @@ class OrderProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = friendlyError(e);
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Update the items and status of an order identified by [orderId].
+  /// Returns true on success, false on failure.
+  Future<bool> updateOrderItemsAndStatus(
+    String orderId,
+    List<CartItem> items,
+    OrderStatus status, {
+    String lastModifiedById = '',
+    String lastModifiedByName = '',
+  }) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final updatedOrder =
+          await _orderService.updateOrderItemsAndStatus(
+            orderId,
+            items,
+            status,
+            lastModifiedById: lastModifiedById,
+            lastModifiedByName: lastModifiedByName,
+          );
+
+      // Update in local list
+      final index = _orders.indexWhere((o) => o.id == orderId);
+      if (index != -1) {
+        _orders[index] = updatedOrder;
+      }
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = friendlyError(e);
       _isLoading = false;
       notifyListeners();
       return false;

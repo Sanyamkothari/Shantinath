@@ -553,6 +553,18 @@ class AppLocalizationsMr extends AppLocalizations {
   String get jowar => 'ज्वारी';
 
   @override
+  String get chana => 'चना (हरभरा)';
+
+  @override
+  String get tilli => 'तीळ (तिळ्ळी)';
+
+  @override
+  String get jawari => 'ज्वारी';
+
+  @override
+  String get mung => 'मूग';
+
+  @override
   String get rupeeSymbol => '₹';
 
   @override

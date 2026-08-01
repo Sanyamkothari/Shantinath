@@ -1,6 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 /// User roles within the application.
 enum UserRole {
   customer,
+  employee,
   admin;
 
   /// Converts a string value to the corresponding [UserRole].
@@ -12,7 +15,7 @@ enum UserRole {
   }
 }
 
-/// Represents an authenticated user (customer or admin).
+/// Represents an authenticated user (customer, employee, or admin).
 class UserModel {
   final String id;
   final String name;
@@ -29,6 +32,12 @@ class UserModel {
   final String district;
   final String khatIdNo;
   final String customerType; // "wholesale" or "retail"
+  final double outstandingBalance;
+  final String balanceType; // "Dr" or "Cr"
+  final DateTime? lastTallySync;
+  final bool isApproved;
+  final String fcmToken;
+  final List<String> permissions;
 
   const UserModel({
     required this.id,
@@ -46,22 +55,64 @@ class UserModel {
     this.district = '',
     this.khatIdNo = '',
     this.customerType = '',
+    this.outstandingBalance = 0.0,
+    this.balanceType = 'Dr',
+    this.lastTallySync,
+    this.isApproved = false,
+    this.fcmToken = '',
+    this.permissions = const [],
   });
 
   /// Whether this user has admin privileges.
   bool get isAdmin => role == UserRole.admin;
 
+  /// Whether this user is an employee.
+  bool get isEmployee => role == UserRole.employee;
+
   /// Whether this user is a regular customer.
   bool get isCustomer => role == UserRole.customer;
 
-  /// Display-friendly role text in English.
-  String get roleText => isAdmin ? 'Admin' : 'Customer';
+  /// Whether this user is staff (admin or employee).
+  bool get isStaff => isAdmin || isEmployee;
 
-  /// Display-friendly role text in Hindi.
-  String get roleTextHi => isAdmin ? 'एडमिन' : 'ग्राहक';
+  /// Whether the user has a specific permission.
+  bool hasPermission(String key) => isAdmin || permissions.contains(key);
+
+  /// Display-friendly role text in English.
+  String get roleText {
+    switch (role) {
+      case UserRole.admin:
+        return 'Admin';
+      case UserRole.employee:
+        return 'Employee';
+      case UserRole.customer:
+        return 'Customer';
+    }
+  }
+
+  /// Display-friendly role text in Hindi/Marathi.
+  String get roleTextHi {
+    switch (role) {
+      case UserRole.admin:
+        return 'एडमिन';
+      case UserRole.employee:
+        return 'कर्मचारी';
+      case UserRole.customer:
+        return 'ग्राहक';
+    }
+  }
 
   /// Creates a [UserModel] from a JSON map.
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    DateTime? parsedSyncDate;
+    if (json['lastTallySync'] != null) {
+      if (json['lastTallySync'] is String) {
+        parsedSyncDate = DateTime.tryParse(json['lastTallySync'] as String);
+      } else if (json['lastTallySync'] is Timestamp) {
+        parsedSyncDate = (json['lastTallySync'] as Timestamp).toDate();
+      }
+    }
+
     return UserModel(
       id: json['id'] as String,
       name: json['name'] as String,
@@ -78,6 +129,12 @@ class UserModel {
       district: json['district'] as String? ?? '',
       khatIdNo: json['khatIdNo'] as String? ?? '',
       customerType: json['customerType'] as String? ?? '',
+      outstandingBalance: (json['outstandingBalance'] as num?)?.toDouble() ?? 0.0,
+      balanceType: json['balanceType'] as String? ?? 'Dr',
+      lastTallySync: parsedSyncDate,
+      isApproved: json['isApproved'] as bool? ?? false,
+      fcmToken: (json['fcmToken'] ?? '') as String,
+      permissions: (json['permissions'] as List?)?.cast<String>() ?? const [],
     );
   }
 
@@ -99,6 +156,12 @@ class UserModel {
       'district': district,
       'khatIdNo': khatIdNo,
       'customerType': customerType,
+      'outstandingBalance': outstandingBalance,
+      'balanceType': balanceType,
+      'lastTallySync': lastTallySync != null ? Timestamp.fromDate(lastTallySync!) : null,
+      'isApproved': isApproved,
+      'fcmToken': fcmToken,
+      'permissions': permissions,
     };
   }
 
@@ -119,6 +182,12 @@ class UserModel {
     String? district,
     String? khatIdNo,
     String? customerType,
+    double? outstandingBalance,
+    String? balanceType,
+    DateTime? lastTallySync,
+    bool? isApproved,
+    String? fcmToken,
+    List<String>? permissions,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -136,6 +205,12 @@ class UserModel {
       district: district ?? this.district,
       khatIdNo: khatIdNo ?? this.khatIdNo,
       customerType: customerType ?? this.customerType,
+      outstandingBalance: outstandingBalance ?? this.outstandingBalance,
+      balanceType: balanceType ?? this.balanceType,
+      lastTallySync: lastTallySync ?? this.lastTallySync,
+      isApproved: isApproved ?? this.isApproved,
+      fcmToken: fcmToken ?? this.fcmToken,
+      permissions: permissions ?? this.permissions,
     );
   }
 
@@ -148,5 +223,5 @@ class UserModel {
 
   @override
   String toString() =>
-      'UserModel(id: $id, name: $name, phone: $phone, firmName: $firmName, customerType: $customerType)';
+      'UserModel(id: $id, name: $name, phone: $phone, firmName: $firmName, customerType: $customerType, outstandingBalance: $outstandingBalance $balanceType)';
 }
