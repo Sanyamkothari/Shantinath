@@ -163,19 +163,28 @@ class Order {
 
   /// Creates an [Order] from a JSON map.
   factory Order.fromJson(Map<String, dynamic> json) {
+    DateTime parsedDate;
+    if (json['createdAt'] is Timestamp) {
+      parsedDate = (json['createdAt'] as Timestamp).toDate();
+    } else if (json['createdAt'] is String) {
+      parsedDate = DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now();
+    } else {
+      parsedDate = DateTime.now();
+    }
+
     return Order(
-      id: json['id'] as String,
-      customerId: json['customerId'] as String,
-      customerName: json['customerName'] as String,
-      customerPhone: json['customerPhone'] as String,
-      customerVillage: json['customerVillage'] as String,
-      items: (json['items'] as List<dynamic>)
+      id: json['id'] as String? ?? '',
+      customerId: json['customerId'] as String? ?? '',
+      customerName: json['customerName'] as String? ?? '',
+      customerPhone: json['customerPhone'] as String? ?? '',
+      customerVillage: json['customerVillage'] as String? ?? '',
+      items: (json['items'] as List<dynamic>? ?? [])
           .map((item) => CartItem.fromJson(item as Map<String, dynamic>))
           .toList(),
-      totalAmount: (json['totalAmount'] as num).toDouble(),
-      status: OrderStatus.fromString(json['status'] as String),
+      totalAmount: (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
+      status: OrderStatus.fromString(json['status'] as String? ?? 'pending'),
       notes: json['notes'] as String? ?? '',
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: parsedDate,
       placedById: json['placedById'] as String? ?? '',
       placedByName: json['placedByName'] as String? ?? '',
       lastModifiedById: json['lastModifiedById'] as String? ?? '',

@@ -122,6 +122,22 @@ class DeliveryMemo {
   double get totalAmount => lines.fold(0.0, (sum, l) => sum + l.amount);
 
   factory DeliveryMemo.fromJson(Map<String, dynamic> json) {
+    DateTime parsedDate;
+    if (json['createdAt'] is DateTime) {
+      parsedDate = json['createdAt'] as DateTime;
+    } else if (json['createdAt'] is String) {
+      parsedDate = DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now();
+    } else {
+      parsedDate = DateTime.now();
+    }
+
+    DateTime? parsedCancelledDate;
+    if (json['cancelledAt'] is DateTime) {
+      parsedCancelledDate = json['cancelledAt'] as DateTime;
+    } else if (json['cancelledAt'] is String) {
+      parsedCancelledDate = DateTime.tryParse(json['cancelledAt'] as String);
+    }
+
     return DeliveryMemo(
       id: json['id'] as String? ?? '',
       memoNumber: json['memoNumber'] as String? ?? '',
@@ -149,14 +165,11 @@ class DeliveryMemo {
       transporter: json['transporter'] as String? ?? '',
       driverName: json['driverName'] as String? ?? '',
       notes: json['notes'] as String? ?? '',
-      createdAt: DateTime.parse(
-          json['createdAt'] as String? ?? DateTime.now().toIso8601String()),
+      createdAt: parsedDate,
       createdById: json['createdById'] as String? ?? '',
       createdByName: json['createdByName'] as String? ?? '',
       cancelled: json['cancelled'] as bool? ?? false,
-      cancelledAt: json['cancelledAt'] != null
-          ? DateTime.tryParse(json['cancelledAt'] as String)
-          : null,
+      cancelledAt: parsedCancelledDate,
       cancelledByName: json['cancelledByName'] as String? ?? '',
     );
   }

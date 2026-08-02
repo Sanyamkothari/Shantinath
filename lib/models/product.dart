@@ -42,22 +42,31 @@ class Product {
 
   /// Creates a [Product] from a JSON map.
   factory Product.fromJson(Map<String, dynamic> json) {
+    DateTime parsedDate;
+    if (json['createdAt'] is Timestamp) {
+      parsedDate = (json['createdAt'] as Timestamp).toDate();
+    } else if (json['createdAt'] is String) {
+      parsedDate = DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now();
+    } else {
+      parsedDate = DateTime.now();
+    }
+
     return Product(
-      id: json['id'] as String,
-      name: json['name'] as String,
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
       nameMr: (json['nameMr'] ?? json['nameHi'] ?? '') as String,
-      brand: json['brand'] as String,
-      category: json['category'] as String,
-      cropType: json['cropType'] as String,
-      packSize: json['packSize'] as String,
-      price: (json['price'] as num).toDouble(),
+      brand: json['brand'] as String? ?? '',
+      category: json['category'] as String? ?? '',
+      cropType: json['cropType'] as String? ?? '',
+      packSize: json['packSize'] as String? ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
       imageUrl: (json['imageUrl'] ?? '') as String,
-      description: json['description'] as String,
+      description: json['description'] as String? ?? '',
       descriptionMr: (json['descriptionMr'] ?? json['descriptionHi'] ?? '') as String,
       inStock: json['inStock'] as bool? ?? true,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: parsedDate,
       companyCity: (json['companyCity'] ?? '') as String,
-      minOrder: (json['minOrder'] ?? 1) as int,
+      minOrder: (json['minOrder'] as num?)?.toInt() ?? 1,
       packWeight: (json['packWeight'] as num? ?? 0.0).toDouble(),
       isFeatured: json['isFeatured'] as bool? ?? false,
       isVisible: json['isVisible'] as bool? ?? true,
