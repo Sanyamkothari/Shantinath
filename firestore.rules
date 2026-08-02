@@ -11,7 +11,7 @@ service cloud.firestore {
     // Firebase delivers it as "+91XXXXXXXXXX"; user/admin docs are keyed by the
     // 10-digit number, so strip the country code before any lookup/compare.
     function phone10() {
-      return request.auth.token.phone_number.replace('\\+91', '');
+      return ('phone_number' in request.auth.token) ? request.auth.token.phone_number.replace('\\+91', '') : '';
     }
 
     // Checks if the authenticated user owns the document whose ID is a phone number.

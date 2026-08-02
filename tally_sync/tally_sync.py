@@ -1268,8 +1268,9 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
     """Matches Tally ledgers with Firestore users and updates databases."""
     print("\nConnecting to Cloud Firestore...")
     try:
-        cred = credentials.Certificate(service_account_path)
-        firebase_admin.initialize_app(cred)
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(service_account_path)
+            firebase_admin.initialize_app(cred)
         db = firestore.client()
     except Exception as e:
         print(f"Error initializing Firebase Admin SDK: {e}")

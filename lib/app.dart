@@ -233,7 +233,10 @@ class ShantinathAgroApp extends StatelessWidget {
           case AppRoutes.adminEmployees:
             return _buildRoute(const ManageEmployeesScreen(), settings);
           case AppRoutes.employeePermissions:
-            final employee = settings.arguments as UserModel;
+            final employee = settings.arguments as UserModel?;
+            if (employee == null) {
+              return _buildRoute(const HomeScreen(), settings);
+            }
             return _buildRoute(EmployeePermissionsScreen(employee: employee), settings);
           case AppRoutes.employeeTracking:
             return _buildRoute(const EmployeeTrackingScreen(), settings);

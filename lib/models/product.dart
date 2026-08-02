@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 /// Product model representing a seed or fertilizer item.
 class Product {
   final String id;

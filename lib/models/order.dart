@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'cart_item.dart';
 
 /// Possible states an order can be in.

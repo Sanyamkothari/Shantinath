@@ -114,9 +114,9 @@ class UserModel {
     }
 
     return UserModel(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      phone: json['phone'] as String,
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      phone: json['phone'] as String? ?? '',
       village: json['village'] as String? ?? '',
       role: UserRole.fromString(json['role'] as String? ?? 'customer'),
       firmName: json['firmName'] as String? ?? '',
