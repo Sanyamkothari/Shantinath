@@ -91,8 +91,18 @@ class ExcelExportService {
         if (style != null) c.cellStyle = style;
       }
 
-      // 1. Letterhead — matches the PDF: address, licences, e-mail. No GSTIN,
-      //    state code or phone, which the Tally statement print also omits.
+      void putMerged(int endCol, int row, CellValue v, [CellStyle? style]) {
+        sheet.merge(
+          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row),
+          CellIndex.indexByColumnRow(columnIndex: endCol, rowIndex: row),
+          customValue: v,
+        );
+        final c = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row));
+        if (style != null) c.cellStyle = style;
+      }
+
+      // 1. Letterhead — matches the PDF: address, licences, e-mail. Merged across
+      //    cols 0..6 so text is centered across the whole table.
       for (final line in <String>[
         AppConstants.sellerName,
         AppConstants.sellerAddress,
@@ -107,24 +117,24 @@ class ExcelExportService {
         if (AppConstants.sellerEmail.isNotEmpty)
           'E-Mail : ${AppConstants.sellerEmail}',
       ]) {
-        put(0, r, TextCellValue(line), centred(bold: r == 0, size: r == 0 ? 14 : 10));
+        putMerged(6, r, TextCellValue(line), centred(bold: r == 0, size: r == 0 ? 14 : 10));
         r++;
       }
 
       r++;
-      put(0, r++, TextCellValue(account.partyName), centred(bold: true, size: 12));
-      put(0, r++, TextCellValue('Ledger Account'), centred());
+      putMerged(6, r++, TextCellValue(account.partyName), centred(bold: true, size: 12));
+      putMerged(6, r++, TextCellValue('Ledger Account'), centred());
       if (proprietorName.isNotEmpty || phone.isNotEmpty) {
-        put(
-            0,
+        putMerged(
+            6,
             r++,
             TextCellValue([proprietorName, phone]
                 .where((s) => s.isNotEmpty)
                 .join('  •  ')),
             centred());
       }
-      put(
-          0,
+      putMerged(
+          6,
           r++,
           TextCellValue(
               '${_dateFmt.format(account.from)} to ${_dateFmt.format(account.to)}'),

@@ -141,15 +141,26 @@ class LedgerStatementPdfService {
     ];
 
     return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
-        pw.Text(AppConstants.sellerName, style: _s(size: 11, bold: true)),
-        for (final l in lines) pw.Text(l, style: _s(size: 8)),
+        pw.Text(AppConstants.sellerName,
+            style: _s(size: 11, bold: true),
+            textAlign: pw.TextAlign.center),
+        for (final l in lines)
+          pw.Text(l,
+              style: _s(size: 8),
+              textAlign: pw.TextAlign.center),
         pw.SizedBox(height: 8),
-        pw.Text(a.partyName, style: _s(size: 11, bold: true)),
-        pw.Text('Ledger Account', style: _s(size: 8.5)),
+        pw.Text(a.partyName,
+            style: _s(size: 11, bold: true),
+            textAlign: pw.TextAlign.center),
+        pw.Text('Ledger Account',
+            style: _s(size: 8.5),
+            textAlign: pw.TextAlign.center),
         pw.SizedBox(height: 10),
         pw.Text('${_dateFmt.format(a.from)} to ${_dateFmt.format(a.to)}',
-            style: _s(size: 8.5)),
+            style: _s(size: 8.5),
+            textAlign: pw.TextAlign.center),
         pw.SizedBox(height: 8),
       ],
     );
