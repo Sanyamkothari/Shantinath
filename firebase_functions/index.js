@@ -123,8 +123,10 @@ function mcErrorMessage(code) {
 
 /**
  * Sends an OTP via MessageCentral VerifyNow.
- * Expects JSON: { "phone": "10_digit_number" }
+ * Expects JSON: { "phone": "10_digit_number", "requireRegistered"?: true }
  * Returns: { success: true, verificationId } — verificationId is needed to validate.
+ * With requireRegistered, a number that has no users/{phone} profile gets
+ * 404 { code: 'NOT_REGISTERED' } and no SMS is sent (login flow).
  */
 exports.sendOtp = onRequest(
   { region: REGION, cors: true, secrets: [MC_AUTH_TOKEN], invoker: 'public' },
@@ -162,6 +164,30 @@ exports.sendOtp = onRequest(
       return res.status(429).json({
         error: 'Too many OTP requests. Please wait a few minutes and try again.',
       });
+    }
+
+    // Login-only pre-check. The app used to read users/{phone} itself before
+    // sending, but that read is (correctly) denied by firestore.rules for a
+    // signed-out client, which broke login on any device without a live
+    // session. The Admin SDK can answer it here, so an unregistered number
+    // still costs no SMS. Deliberately placed AFTER the quota is consumed so
+    // this cannot enumerate registered numbers any faster than OTPs could be
+    // requested anyway.
+    if (body.requireRegistered === true) {
+      let exists;
+      try {
+        exists = (await db.collection('users').doc(phone).get()).exists;
+      } catch (err) {
+        logger.error('OTP registration pre-check failed:', err);
+        return res.status(503).json({ error: 'Service busy. Please try again shortly.' });
+      }
+      if (!exists) {
+        return res.status(404).json({
+          success: false,
+          code: 'NOT_REGISTERED',
+          error: 'This number is not registered. Please register first.',
+        });
+      }
     }
 
     try {

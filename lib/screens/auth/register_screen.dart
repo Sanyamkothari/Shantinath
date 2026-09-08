@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/widgets/otp_verification_sheet.dart';
@@ -61,20 +62,56 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Future<void> _fetchTallyParties() async {
+    final authProvider = context.read<AuthProvider>();
+    // tally_parties carries every shop's phone and GSTIN, so the security
+    // rules only serve it to signed-in users. Until the phone is OTP-verified
+    // there is no session and the read would be denied; the party picker
+    // verifies first and then calls this again.
+    if (!authProvider.hasAuthSession) return;
+
     setState(() => _isLoadingParties = true);
     try {
-      final authProvider = context.read<AuthProvider>();
       final parties = await authProvider.getTallyParties();
+      if (!mounted) return;
       setState(() {
         _tallyParties = parties;
         _isLoadingParties = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoadingParties = false);
     }
   }
 
-  void _showPartySelectionSheet() {
+  Future<void> _showPartySelectionSheet() async {
+    final authProvider = context.read<AuthProvider>();
+
+    if (!authProvider.hasAuthSession) {
+      // Prove ownership of the number first; that signs the device in and
+      // unlocks the party lookup. The same verification is reused on submit.
+      final phone = _phoneController.text.trim();
+      if (phone.length != AppConstants.phoneLength ||
+          int.tryParse(phone) == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Enter your 10-digit mobile number first. We verify it by OTP before showing the firm list.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+        return;
+      }
+
+      final verified = await _verifyPhoneViaOtp(phone);
+      if (!mounted || !verified) return;
+
+      await _fetchTallyParties();
+      if (!mounted) return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -245,6 +282,25 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
 
     if (!mounted) return false;
+
+    if (verified == true && authProvider.isLoggedIn) {
+      // The number already has an account, so the OTP simply signed them in.
+      // Creating a second profile would be refused anyway; go home instead.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('This number is already registered. Signing you in.'),
+          backgroundColor: const Color(0xFF2E7D32),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        AppRoutes.home,
+        (route) => false,
+      );
+      return false;
+    }
+
     return verified == true && authProvider.isPhoneVerified(phone);
   }
 

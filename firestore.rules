@@ -50,6 +50,14 @@ service cloud.firestore {
         && (me().role == 'admin' || (me().get('permissions', []).hasAny([p])));
     }
 
+    // Whether the signed-in user's own profile allows placing an order for
+    // themselves: approved customers, plus staff (employees are provisioned
+    // approved, but they are never gated on that flag).
+    function canOrderForSelf() {
+      return exists(/databases/$(database)/documents/users/$(phone10())) &&
+        (me().get('isApproved', false) == true || me().get('role', 'customer') != 'customer');
+    }
+
     // True when an update does NOT attempt to change any privileged field.
     // Privileged fields (role, approval, balances, permissions) may only be set by the Admin
     // SDK (Tally sync) or an authorized staff/admin — never by the document owner.
@@ -81,14 +89,17 @@ service cloud.firestore {
 
       // Owners may update their own non-privileged profile fields.
       // Bootstrap admin is fully protected and can only be updated/deleted by themselves.
-      // Admins and managePermissions/manageEmployees holders can edit users (if not elevating to or modifying admins).
+      // Admins can edit anyone. managePermissions / manageEmployees holders can
+      // edit users too, but may neither touch an existing admin nor promote
+      // anyone (themselves included) to admin — only an admin can mint admins.
       allow update: if isAuthenticated() && (
         (isBootstrapAdmin(phoneId) && phone10() == phoneId) ||
         (!isBootstrapAdmin(phoneId) && (
           (isOwner(phoneId) && privilegedFieldsUnchanged()) ||
           isAdmin() ||
-          hasPerm('managePermissions') ||
-          (hasPerm('manageEmployees') && resource.data.get('role', 'customer') != 'admin' && request.resource.data.get('role', 'customer') != 'admin')
+          ((hasPerm('managePermissions') || hasPerm('manageEmployees')) &&
+            resource.data.get('role', 'customer') != 'admin' &&
+            request.resource.data.get('role', 'customer') != 'admin')
         ))
       );
 
@@ -193,19 +204,34 @@ service cloud.firestore {
     // Orders Collection
     match /orders/{orderId} {
       // Users can read their own orders; admins/staff with manageOrders or viewCustomerDirectory can read all.
+      // `resource == null` (a get on a number that is not taken) is allowed so
+      // OrderService.placeOrder can check the number is free inside its
+      // transaction before writing; it reveals nothing but non-existence.
       allow read: if isAuthenticated() &&
-        (resource.data.customerId == request.auth.token.phone_number ||
+        (resource == null ||
+         resource.data.customerId == request.auth.token.phone_number ||
          resource.data.customerId == phone10() ||
          isAdmin() ||
          hasPerm('manageOrders') ||
          hasPerm('viewCustomerDirectory'));
 
-      // Users can create orders for themselves; staff with placeOrderForRetailer can create orders for anyone.
+      // Approved users can create orders for themselves; staff with
+      // placeOrderForRetailer can create orders for anyone. The approval check
+      // mirrors the app's route guard: a pending account could otherwise place
+      // orders straight through the API. Prices are still client-supplied (the
+      // rules cannot look up every product), so the pending-order screens and
+      // sales reports trust the amounts on the document, and invoicing stays
+      // with Tally.
       allow create: if isAuthenticated() &&
-        (request.resource.data.customerId == request.auth.token.phone_number ||
-         request.resource.data.customerId == phone10() ||
-         isAdmin() ||
-         hasPerm('placeOrderForRetailer'));
+        request.resource.data.items is list &&
+        request.resource.data.items.size() > 0 &&
+        request.resource.data.totalAmount is number &&
+        request.resource.data.totalAmount >= 0 &&
+        (
+          ((request.resource.data.customerId == request.auth.token.phone_number ||
+            request.resource.data.customerId == phone10()) && canOrderForSelf()) ||
+          isAdmin() ||
+          hasPerm('placeOrderForRetailer'));
 
       // Admins/staff with manageOrders can update or delete orders. Staff with
       // createDeliveryMemo may also update: generating a memo advances the

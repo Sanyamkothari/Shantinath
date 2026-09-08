@@ -38,10 +38,17 @@ class AuthService {
   ///
   /// [onCodeSent] receives the MessageCentral `verificationId` (needed for
   /// validation). [onError] receives a human-readable failure message.
+  ///
+  /// With [requireRegistered] the server refuses (without sending an SMS) when
+  /// no profile exists for [phone] and [onNotRegistered] is called instead.
+  /// This has to be a server-side check: a signed-out client cannot read
+  /// `users/{phone}` itself, the security rules deny it.
   Future<void> sendOtp({
     required String phone,
     required Function(String verificationId) onCodeSent,
     required Function(String error) onError,
+    bool requireRegistered = false,
+    void Function()? onNotRegistered,
   }) async {
     final trimmedPhone = phone.trim();
 
@@ -56,7 +63,10 @@ class AuthService {
       final response = await http.post(
         Uri.parse('$_functionsBaseUrl/sendOtp'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': trimmedPhone}),
+        body: jsonEncode({
+          'phone': trimmedPhone,
+          if (requireRegistered) 'requireRegistered': true,
+        }),
       );
 
       // Guard: Cloud Functions may return an HTML error page (e.g. 404/500)
@@ -70,6 +80,8 @@ class AuthService {
       final data = jsonDecode(body) as Map<String, dynamic>;
       if (response.statusCode == 200 && data['success'] == true) {
         onCodeSent(data['verificationId'].toString());
+      } else if (data['code'] == 'NOT_REGISTERED' && onNotRegistered != null) {
+        onNotRegistered();
       } else {
         onError(data['error']?.toString() ?? 'Failed to send OTP.');
       }
@@ -384,12 +396,6 @@ class AuthService {
     final data = doc.data() as Map<String, dynamic>?;
     if (data == null) return null;
     return UserModel.fromJson(data);
-  }
-
-  /// Check if a phone number is registered.
-  Future<bool> isPhoneRegistered(String phone) async {
-    final doc = await _usersRef.doc(phone.trim()).get();
-    return doc.exists;
   }
 
   /// Fetch all synced Tally parties for registration lookup.

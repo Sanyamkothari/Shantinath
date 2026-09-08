@@ -9,26 +9,17 @@ class BannerService {
   factory BannerService() => _instance;
   BannerService._internal();
 
-  /// Retrieve all banners. Seeds the database if empty.
+  /// Retrieve all banners, newest first.
+  ///
+  /// NOTE: This intentionally does NOT seed the collection when it is empty.
+  /// Only admins/staff may write `banners` (see firestore.rules), so seeding
+  /// as a side-effect of a read threw `permission-denied` for every customer
+  /// whose home screen loaded while the collection was empty (a fresh
+  /// project, or after an admin deleted the last banner). Admins add banners
+  /// from Manage Banners; [PromoBanner.getSampleBanners] stays available as
+  /// reference content.
   Future<List<PromoBanner>> getAllBanners() async {
     final snapshot = await _bannersRef.get();
-
-    if (snapshot.docs.isEmpty) {
-      final samples = PromoBanner.getSampleBanners();
-      final batch = _db.batch();
-
-      for (final banner in samples) {
-        final docRef = _bannersRef.doc(banner.id);
-        batch.set(docRef, banner.toJson());
-      }
-
-      await batch.commit();
-
-      final currentSnapshot = await _bannersRef.orderBy('createdAt', descending: true).get();
-      return currentSnapshot.docs
-          .map((doc) => PromoBanner.fromJson(doc.data() as Map<String, dynamic>))
-          .toList();
-    }
 
     // Sort by createdAt descending
     final list = snapshot.docs

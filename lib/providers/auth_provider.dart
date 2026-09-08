@@ -8,6 +8,9 @@ import 'package:shantinath_agro/models/user_model.dart';
 import 'package:shantinath_agro/services/auth_service.dart';
 import 'package:shantinath_agro/services/activity_service.dart';
 
+/// Outcome of a login-time OTP request (see [AuthProvider.sendLoginOtp]).
+enum OtpSendResult { sent, notRegistered, failed }
+
 /// ChangeNotifier provider for authentication state.
 /// Wraps [AuthService] and exposes reactive state for the UI.
 class AuthProvider extends ChangeNotifier {
@@ -47,6 +50,13 @@ class AuthProvider extends ChangeNotifier {
   /// Used to gate registration so an account can only be created for a phone
   /// number whose ownership was proven via OTP.
   bool isPhoneVerified(String phone) => _otpVerifiedPhone == phone.trim();
+
+  /// Whether a Firebase Auth session exists, i.e. Firestore reads that the
+  /// security rules restrict to signed-in users will succeed. This is true
+  /// before [isLoggedIn] during registration: the phone has been OTP-verified
+  /// (and signed in with the custom token) but no profile exists yet.
+  bool get hasAuthSession =>
+      AppConstants.useMockOtp || FirebaseAuth.instance.currentUser != null;
 
   /// Whether the current user has admin privileges.
   bool get isAdmin =>
@@ -144,6 +154,43 @@ class AuthProvider extends ChangeNotifier {
         _otpSent = false;
         _setLoading(false);
         completer.complete(false);
+      },
+    );
+
+    return completer.future;
+  }
+
+  /// Send a login OTP to [phone].
+  ///
+  /// Unlike [sendOtp], the server first checks that an account exists for the
+  /// number, so no SMS is spent on an unregistered one; the caller gets
+  /// [OtpSendResult.notRegistered] instead. Designated admin numbers skip that
+  /// check because they self-provision their profile on first login.
+  Future<OtpSendResult> sendLoginOtp(String phone) async {
+    _setLoading(true);
+    _clearError();
+
+    final completer = Completer<OtpSendResult>();
+
+    await _authService.sendOtp(
+      phone: phone,
+      requireRegistered: !AppConstants.adminPhones.contains(phone.trim()),
+      onCodeSent: (verificationId) {
+        _verificationId = verificationId;
+        _otpSent = true;
+        _setLoading(false);
+        completer.complete(OtpSendResult.sent);
+      },
+      onNotRegistered: () {
+        _otpSent = false;
+        _setLoading(false);
+        completer.complete(OtpSendResult.notRegistered);
+      },
+      onError: (error) {
+        _setError(error);
+        _otpSent = false;
+        _setLoading(false);
+        completer.complete(OtpSendResult.failed);
       },
     );
 
@@ -397,16 +444,6 @@ class AuthProvider extends ChangeNotifier {
       return raw.substring(11);
     }
     return raw;
-  }
-
-  /// Check whether a phone number is already registered in the system.
-  /// Used by the login screen to avoid burning OTP credits for unregistered numbers.
-  /// Admin phones are always considered registered (they auto-bootstrap on first login).
-  Future<bool> isPhoneRegistered(String phone) async {
-    final trimmed = phone.trim();
-    // Admin phones auto-create their profile on first login, so always allow.
-    if (AppConstants.adminPhones.contains(trimmed)) return true;
-    return await _authService.isPhoneRegistered(trimmed);
   }
 
   /// Fetch all synced Tally parties for registration lookup.

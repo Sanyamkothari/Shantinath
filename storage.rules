@@ -1,0 +1,46 @@
+rules_version = '2';
+
+// Cloud Storage holds only product and banner images, uploaded by staff from
+// the admin screens (see lib/services/storage_service.dart). Customers never
+// upload anything. Images are public because the catalog itself is public
+// (firestore.rules lets signed-out visitors read `products` and `banners`).
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // The app signs in with a custom token whose uid is the bare 10-digit
+    // phone number, which is also the users/{phoneId} document id.
+    //
+    // NOTE: the Local Emulator Suite's Storage emulator cannot evaluate this
+    // cross-service Firestore lookup (it denies every write that reaches it),
+    // so it is only testable against the real project. After deploying, do
+    // one product-image upload from an admin account to confirm it passes.
+    function isStaff() {
+      return request.auth != null &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['admin', 'employee'];
+    }
+
+    // An image no bigger than 5 MB. request.resource is null on delete, so
+    // this also means files can only be added or replaced, never removed from
+    // the app.
+    function isImageUpload() {
+      return request.resource != null &&
+        request.resource.contentType.matches('image/.*') &&
+        request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    match /products/images/{fileName} {
+      allow read: if true;
+      allow write: if isStaff() && isImageUpload();
+    }
+
+    match /banners/images/{fileName} {
+      allow read: if true;
+      allow write: if isStaff() && isImageUpload();
+    }
+
+    // Everything else is closed.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

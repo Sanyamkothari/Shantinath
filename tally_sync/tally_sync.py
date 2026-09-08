@@ -896,6 +896,49 @@ def sanitize_phone(phone_str):
     return digits
 
 
+def index_users(user_docs):
+    """Builds the lookup tables used to match Tally ledgers to app users.
+
+    Only APPROVED customers are indexed. A customer types (or picks from the
+    Tally party list) their own firm name at registration, and until an admin
+    approves the account nothing proves that name is theirs. Indexing pending
+    accounts let anyone register under another shop's name and receive that
+    shop's outstanding balance and full statement on the next sync.
+
+    Returns (users_by_phone, users_by_firm, users_by_gst, user_data_by_id,
+    skipped_unapproved). Each lookup maps a normalised key to the LIST of user
+    ids carrying it, so a shop with two approved logins syncs to both instead
+    of whichever happened to be read last.
+
+    [user_docs] are Firestore snapshots (anything with `.id` and `.to_dict()`).
+    """
+    users_by_phone = {}
+    users_by_firm = {}
+    users_by_gst = {}
+    user_data_by_id = {}
+    skipped_unapproved = 0
+
+    for user_doc in user_docs:
+        data = user_doc.to_dict() or {}
+        if data.get('isApproved') is not True:
+            skipped_unapproved += 1
+            continue
+
+        user_data_by_id[user_doc.id] = data
+        phone = sanitize_phone(data.get('phone') or '')
+        firm = (data.get('firmName') or '').strip().lower()
+        gst = (data.get('gstNo') or '').strip().upper()
+
+        if phone:
+            users_by_phone.setdefault(phone, []).append(user_doc.id)
+        if firm:
+            users_by_firm.setdefault(firm, []).append(user_doc.id)
+        if gst:
+            users_by_gst.setdefault(gst, []).append(user_doc.id)
+
+    return users_by_phone, users_by_firm, users_by_gst, user_data_by_id, skipped_unapproved
+
+
 # ---------------------------------------------------------------------------
 # Core Integration Functions
 # ---------------------------------------------------------------------------
@@ -1472,29 +1515,13 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
         print(f"Error fetching users from Firestore: {e}")
         sys.exit(1)
 
-    print(f"  Found {len(users)} registered customers in mobile application database.")
+    users_by_phone, users_by_firm, users_by_gst, user_data_by_id, skipped_unapproved = \
+        index_users(users)
+
+    print(f"  Found {len(users)} registered customers in mobile application database"
+          f" ({len(user_data_by_id)} approved, {skipped_unapproved} awaiting approval and not synced).")
 
     matched_count = 0
-
-    # Index users by phone, firm name, and GST for fast matching
-    users_by_phone = {}
-    users_by_firm = {}
-    users_by_gst = {}
-    user_data_by_id = {}
-
-    for user_doc in users:
-        data = user_doc.to_dict()
-        user_data_by_id[user_doc.id] = data
-        phone = sanitize_phone(data.get('phone', ''))
-        firm = data.get('firmName', '').strip().lower()
-        gst = data.get('gstNo', '').strip().upper()
-
-        if phone:
-            users_by_phone[phone] = user_doc.id
-        if firm:
-            users_by_firm[firm] = user_doc.id
-        if gst:
-            users_by_gst[gst] = user_doc.id
 
     # Iterate through ALL Sundry Debtor ledgers and match
     for ledger in debtor_ledgers:
@@ -1503,25 +1530,30 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
         t_gst = ledger['gstNo'].strip().upper() if ledger['gstNo'] else ""
         t_firm_lower = t_name.strip().lower()
 
-        matched_user_id = None
+        matched_user_ids = []
         match_reason = ""
 
         # Match logic hierarchy:
         # 1. Firm/Ledger Name match (most reliable for this setup)
         if t_firm_lower in users_by_firm:
-            matched_user_id = users_by_firm[t_firm_lower]
+            matched_user_ids = users_by_firm[t_firm_lower]
             match_reason = f"Firm Name ('{t_name}')"
         # 2. Phone number match
         elif t_phone and t_phone in users_by_phone:
-            matched_user_id = users_by_phone[t_phone]
+            matched_user_ids = users_by_phone[t_phone]
             match_reason = f"Phone Number ({t_phone})"
         # 3. GST Number match
         elif t_gst and t_gst in users_by_gst:
-            matched_user_id = users_by_gst[t_gst]
+            matched_user_ids = users_by_gst[t_gst]
             match_reason = f"GSTIN ({t_gst})"
 
-        if matched_user_id:
-            matched_count += 1
+        if not matched_user_ids:
+            continue
+        matched_count += 1
+
+        # One ledger can legitimately map to several approved logins (a shop
+        # with two phones); each gets the same balance and statement.
+        for matched_user_id in matched_user_ids:
             print(f"  ✔ Matched: '{t_name}' -> User ID: {matched_user_id} via {match_reason}")
 
             user_profile = user_data_by_id.get(matched_user_id, {})
@@ -1642,6 +1674,8 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
 
     print(f"\n{'='*50}")
     print(f"Sync complete. Matched and updated {matched_count} of {len(debtor_ledgers)} debtor ledgers.")
+    if skipped_unapproved:
+        print(f"Skipped {skipped_unapproved} customer(s) awaiting admin approval (approve them in the app to sync).")
     print(f"Shop names in registration lookup: {len(shop_ledgers)}")
     if dry_run:
         print("NOTE: Executed in DRY RUN mode. No data was written to Firestore.")

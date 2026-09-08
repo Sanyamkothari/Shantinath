@@ -10,26 +10,15 @@ class BroadcastService {
   factory BroadcastService() => _instance;
   BroadcastService._internal();
 
-  /// Retrieve all broadcasts. Seeds the database with default announcements if empty.
+  /// Retrieve all broadcasts, newest first.
+  ///
+  /// NOTE: This intentionally does NOT seed the collection when it is empty.
+  /// Only admins/staff may write `broadcasts` (see firestore.rules), so
+  /// seeding as a side-effect of a read threw `permission-denied` for every
+  /// customer who opened Notifications while the collection was empty.
+  /// Admins publish announcements from Manage Broadcasts.
   Future<List<BroadcastMessage>> getAllBroadcasts() async {
     final snapshot = await _broadcastsRef.get();
-
-    if (snapshot.docs.isEmpty) {
-      final samples = BroadcastMessage.getSampleBroadcasts();
-      final batch = _db.batch();
-
-      for (final msg in samples) {
-        final docRef = _broadcastsRef.doc(msg.id);
-        batch.set(docRef, msg.toJson());
-      }
-
-      await batch.commit();
-
-      final currentSnapshot = await _broadcastsRef.orderBy('createdAt', descending: true).get();
-      return currentSnapshot.docs
-          .map((doc) => BroadcastMessage.fromJson(doc.data() as Map<String, dynamic>))
-          .toList();
-    }
 
     final list = snapshot.docs
         .map((doc) => BroadcastMessage.fromJson(doc.data() as Map<String, dynamic>))

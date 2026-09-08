@@ -58,11 +58,13 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       final authProvider = context.read<AuthProvider>();
 
-      // ── Step 1: Check if the number is registered before sending OTP ──
-      final isRegistered = await authProvider.isPhoneRegistered(phone);
+      // ── Step 1: Ask the server for a login OTP. It refuses, without
+      // spending an SMS, when no account exists for this number. (The check
+      // must be server-side: a signed-out client cannot read users/{phone}.)
+      final result = await authProvider.sendLoginOtp(phone);
       if (!mounted) return;
 
-      if (!isRegistered) {
+      if (result == OtpSendResult.notRegistered) {
         setState(() => _isLoading = false);
         // Show "not registered" dialog
         showDialog(
@@ -120,43 +122,47 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
-      // ── Step 2: Number is registered — send OTP ──
-      final success = await authProvider.sendOtp(phone);
+      if (result == OtpSendResult.failed) {
+        throw Exception(authProvider.errorMessage ?? 'Failed to send OTP code');
+      }
+
+      // ── Step 2: OTP sent — show the verification sheet ──
+      final verified = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(28),
+            topRight: Radius.circular(28),
+          ),
+        ),
+        builder: (_) => OtpVerificationSheet(
+          phone: phone,
+          onVerify: (otp) async {
+            final ok = await authProvider.verifyOtpAndLogin(phone, otp);
+            return ok
+                ? null
+                : (authProvider.errorMessage ??
+                    'Incorrect OTP code. Please try again.');
+          },
+          onResend: () => authProvider.sendOtp(phone),
+        ),
+      );
 
       if (!mounted) return;
 
-      if (success) {
-        // Show the verification OTP sheet
-        final verified = await showModalBottomSheet<bool>(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.white,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(28),
-              topRight: Radius.circular(28),
-            ),
-          ),
-          builder: (_) => OtpVerificationSheet(
-            phone: phone,
-            onVerify: (otp) async {
-              final ok = await authProvider.verifyOtpAndLogin(phone, otp);
-              return ok
-                  ? null
-                  : (authProvider.errorMessage ??
-                      'Incorrect OTP code. Please try again.');
-            },
-            onResend: () => authProvider.sendOtp(phone),
-          ),
-        );
-
-        if (!mounted) return;
-
-        if (verified == true && authProvider.isLoggedIn) {
+      if (verified == true) {
+        if (authProvider.isLoggedIn) {
           Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+        } else if (authProvider.isPhoneVerified(phone)) {
+          // The code was valid but no profile exists (mock OTP, or the server
+          // pre-check is not deployed). The phone is now signed in, so the
+          // registration screen can load the Tally party list; hand it the
+          // verified number so it does not ask for another OTP.
+          Navigator.of(context)
+              .pushNamed(AppRoutes.register, arguments: phone);
         }
-      } else {
-        throw Exception(authProvider.errorMessage ?? 'Failed to send OTP code');
       }
     } catch (e) {
       if (!mounted) return;

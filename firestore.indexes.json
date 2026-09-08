@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "delivery_memos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "orderId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

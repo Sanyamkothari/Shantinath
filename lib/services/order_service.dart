@@ -14,19 +14,39 @@ class OrderService {
   factory OrderService() => _instance;
   OrderService._internal();
 
-  /// Place a new order in Firestore. Returns the placed order with a generated ID.
-  Future<Order> placeOrder(Order order) async {
-    final orderId = 'ORD-${_uuid.v4().substring(0, 6).toUpperCase()}';
-    
-    final newOrder = order.copyWith(
-      id: orderId,
-      status: OrderStatus.pending,
-      createdAt: DateTime.now(),
-    );
+  /// How many fresh order numbers to try before giving up (see [placeOrder]).
+  static const int _maxIdAttempts = 5;
 
-    // Save to Firestore
-    await _ordersRef.doc(orderId).set(newOrder.toJson());
-    return newOrder;
+  /// Place a new order in Firestore. Returns the placed order with a generated ID.
+  ///
+  /// Order numbers are short (`ORD-` + 6 hex digits, ~16.7M values) so they
+  /// fit on memos and in chat. That is small enough for two orders to draw the
+  /// same number once a few thousand exist, and a plain `set()` would then
+  /// silently overwrite the earlier order. The write therefore runs in a
+  /// transaction that first checks the number is unused and retries with a
+  /// new one if not.
+  Future<Order> placeOrder(Order order) async {
+    for (var attempt = 0; attempt < _maxIdAttempts; attempt++) {
+      final orderId = 'ORD-${_uuid.v4().substring(0, 6).toUpperCase()}';
+      final docRef = _ordersRef.doc(orderId);
+
+      final newOrder = order.copyWith(
+        id: orderId,
+        status: OrderStatus.pending,
+        createdAt: DateTime.now(),
+      );
+
+      final created = await _db.runTransaction<bool>((txn) async {
+        final existing = await txn.get(docRef);
+        if (existing.exists) return false;
+        txn.set(docRef, newOrder.toJson());
+        return true;
+      });
+
+      if (created) return newOrder;
+    }
+    throw Exception(
+        'Could not allocate a unique order number. Please try again.');
   }
 
   /// Get all orders for a specific customer by [customerId] from Firestore.

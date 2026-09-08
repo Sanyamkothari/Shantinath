@@ -10,9 +10,15 @@ This folder contains the **Tally Sync Agent** which connects your local Tally Pr
 2. It queries all ledgers under the parent group **Sundry Debtors** (your customers).
 3. It fetches all vouchers (transactions like Sales Invoices, Receipts, Credit Notes, Journals) for the last $N$ days.
 4. It connects to Firestore and matches Tally ledgers to mobile users using:
+   - **Firm Name**: (Tally ledger name $\rightarrow$ User profile Firm Name)
    - **Phone Number**: (Tally ledger contact mobile number $\rightarrow$ User registration phone)
    - **GSTIN**: (Tally ledger GST number $\rightarrow$ User profile GSTIN)
-   - **Firm Name**: (Tally ledger name $\rightarrow$ User profile Firm Name)
+
+   Only customers an admin has **approved** in the app are matched. A pending
+   registration is never synced: the firm name on it is whatever the customer
+   typed, and approving the account is how you confirm it really is their shop.
+   Approve customers from the admin Customer Directory before expecting their
+   balance to appear.
 5. It writes the net balance, debit/credit status, and transaction history to Firestore.
 
 ---
