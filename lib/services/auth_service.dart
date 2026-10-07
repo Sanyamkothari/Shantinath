@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shantinath_agro/config/constants.dart';
@@ -11,7 +10,8 @@ import 'package:shantinath_agro/models/user_model.dart';
 /// Authentication service backed by Firebase Firestore and Firebase Auth.
 ///
 /// OTP is handled by MessageCentral VerifyNow (no DLT registration required) via
-/// two Cloud Functions that keep the MessageCentral credentials server-side:
+/// two endpoints on a Cloudflare Worker (otp_worker/) that keep the
+/// MessageCentral credentials server-side:
 ///   • sendOtp   → MessageCentral /verification/v3/send   → returns verificationId
 ///   • verifyOtp → MessageCentral /verification/v3/validateOtp → mints a Firebase
 ///                 custom token (uid = phone, claim phone_number = `+91<phone>`).
@@ -27,12 +27,9 @@ class AuthService {
   factory AuthService() => _instance;
   AuthService._internal();
 
-  String get _functionsBaseUrl {
-    final projectId = Firebase.app().options.projectId;
-    return 'https://${AppConstants.cloudFunctionsRegion}-$projectId.cloudfunctions.net';
-  }
+  String get _otpBaseUrl => AppConstants.otpApiBaseUrl.replaceAll(RegExp(r'/+$'), '');
 
-  /// Send an OTP to the specified [phone] via the sendOtp Cloud Function
+  /// Send an OTP to the specified [phone] via the OTP Worker's /sendOtp endpoint
   /// (MessageCentral VerifyNow). If [AppConstants.useMockOtp] is true, triggers
   /// a simulated dispatch.
   ///
@@ -61,7 +58,7 @@ class AuthService {
 
     try {
       final response = await http.post(
-        Uri.parse('$_functionsBaseUrl/sendOtp'),
+        Uri.parse('$_otpBaseUrl/sendOtp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phone': trimmedPhone,
@@ -69,8 +66,8 @@ class AuthService {
         }),
       );
 
-      // Guard: Cloud Functions may return an HTML error page (e.g. 404/500)
-      // when the function is not deployed or crashes on startup.
+      // Guard: a proxy/edge error may return an HTML page instead of JSON
+      // when the Worker is not deployed or crashes on startup.
       final body = response.body.trim();
       if (body.startsWith('<') || body.startsWith('<!')) {
         onError('Server error. The OTP service is temporarily unavailable. Please try again later.');
@@ -91,7 +88,7 @@ class AuthService {
   }
 
   /// Verify the OTP [smsCode] against the MessageCentral [verificationId] via
-  /// the verifyOtp Cloud Function, sign in with the returned custom token, and
+  /// the OTP Worker's /verifyOtp endpoint, sign in with the returned custom token, and
   /// fetch/create the user profile.
   /// Returns the authenticated [UserModel].
   /// Throws Exception('USER_NOT_REGISTERED') if OTP is valid but the profile
@@ -112,7 +109,7 @@ class AuthService {
 
     try {
       final response = await http.post(
-        Uri.parse('$_functionsBaseUrl/verifyOtp'),
+        Uri.parse('$_otpBaseUrl/verifyOtp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phone': trimmedPhone,
@@ -121,8 +118,8 @@ class AuthService {
         }),
       );
 
-      // Guard: Cloud Functions may return an HTML error page (e.g. 404/500)
-      // when the function is not deployed or crashes on startup.
+      // Guard: a proxy/edge error may return an HTML page instead of JSON
+      // when the Worker is not deployed or crashes on startup.
       final body = response.body.trim();
       if (body.startsWith('<') || body.startsWith('<!')) {
         throw Exception('Server error. The OTP service is temporarily unavailable. Please try again later.');

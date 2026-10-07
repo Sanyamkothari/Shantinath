@@ -1,0 +1,17 @@
+name = "shantinath-otp"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Daily cleanup of expired OTP sessions / rate-limit rows (free on Workers).
+[triggers]
+crons = ["0 3 * * *"]
+
+# Create with `wrangler d1 create shantinath-otp`, then paste the printed id.
+[[d1_databases]]
+binding = "DB"
+database_name = "shantinath-otp"
+database_id = "2a6c0123-8726-4bcc-930f-bbbf35651c83"
+
+# Secrets (never put these in this file):
+#   wrangler secret put MC_AUTH_TOKEN     # MessageCentral VerifyNow auth token
+#   wrangler secret put FIREBASE_SA_KEY   # full service-account JSON

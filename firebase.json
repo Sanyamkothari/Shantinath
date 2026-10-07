@@ -6,18 +6,6 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "functions": [
-    {
-      "source": "firebase_functions",
-      "codebase": "default",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firestore-debug.log"
-      ]
-    }
-  ],
   "hosting": {
     "public": "build/web",
     "ignore": [

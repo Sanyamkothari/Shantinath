@@ -3,6 +3,7 @@ import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/models/delivery_memo.dart';
 import 'package:shantinath_agro/models/order.dart';
 import 'package:shantinath_agro/models/user_model.dart';
+import 'package:shantinath_agro/services/activity_service.dart';
 
 /// Handles creation and voiding of delivery memos. All operations that touch
 /// both the memo and the source order run inside a Firestore transaction so
@@ -51,6 +52,11 @@ class DeliveryMemoService {
     final orderRef = _ordersRef.doc(order.id);
     final memoRef = _memosRef.doc();
 
+    // Captured inside the transaction (reassigned if it retries) so the audit
+    // row can be written once, after the commit succeeds.
+    Order? orderBefore;
+    Order? orderAfter;
+
     final memo = await _db.runTransaction<DeliveryMemo>((txn) async {
       // ---- READS (all reads must precede writes in a transaction) ----
       final counterSnap = await txn.get(counterRef);
@@ -93,6 +99,8 @@ class DeliveryMemoService {
         lastModifiedByName: createdBy.name,
       );
       final computedStatus = updatedOrder.getComputedStatus();
+      orderBefore = currentOrder;
+      orderAfter = updatedOrder.copyWith(status: computedStatus);
 
       final memo = DeliveryMemo(
         id: memoRef.id,
@@ -142,6 +150,14 @@ class DeliveryMemoService {
       return memo;
     });
 
+    if (orderBefore != null && orderAfter != null) {
+      await ActivityService.logOrderModified(
+        before: orderBefore!,
+        after: orderAfter!,
+        modifiedById: createdBy.id,
+        modifiedByName: createdBy.name,
+      );
+    }
     return memo;
   }
 
@@ -157,6 +173,9 @@ class DeliveryMemoService {
 
     final memoRef = _memosRef.doc(memo.id);
     final orderRef = _ordersRef.doc(memo.orderId);
+
+    Order? orderBefore;
+    Order? orderAfter;
 
     await _db.runTransaction((txn) async {
       final memoSnap = await txn.get(memoRef);
@@ -185,6 +204,9 @@ class DeliveryMemoService {
         }).toList();
 
         final updatedOrder = currentOrder.copyWith(items: updatedItems);
+        orderBefore = currentOrder;
+        orderAfter =
+            updatedOrder.copyWith(status: updatedOrder.getComputedStatus());
 
         txn.update(orderRef, {
           'items': updatedItems.map((i) => i.toJson()).toList(),
@@ -200,6 +222,15 @@ class DeliveryMemoService {
         'cancelledByName': voidedBy.name,
       });
     });
+
+    if (orderBefore != null && orderAfter != null) {
+      await ActivityService.logOrderModified(
+        before: orderBefore!,
+        after: orderAfter!,
+        modifiedById: voidedBy.id,
+        modifiedByName: voidedBy.name,
+      );
+    }
   }
 
   /// All memos for a given order, newest first.
