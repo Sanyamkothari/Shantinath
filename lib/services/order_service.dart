@@ -54,18 +54,34 @@ class OrderService {
         'Could not allocate a unique order number. Please try again.');
   }
 
-  /// Get all orders for a specific customer by [customerId] from Firestore.
-  /// Sorted by most recent first.
+  /// How many of a customer's most recent orders the app loads. Each order is
+  /// one Firestore read, and every customer opens their order list often.
+  static const int customerOrderLimit = 50;
+
+  /// Get the most recent orders for a specific customer by [customerId] from
+  /// Firestore, newest first (at most [customerOrderLimit]).
   Future<List<Order>> getOrdersByCustomer(String customerId) async {
-    final snapshot = await _ordersRef
-        .where('customerId', isEqualTo: customerId)
-        .get();
+    QuerySnapshot snapshot;
+    try {
+      // Needs the (customerId ASC, createdAt DESC) composite index in
+      // firestore.indexes.json. Until it is deployed the query fails with
+      // failed-precondition and we fall back to the old unbounded read so the
+      // list still works.
+      snapshot = await _ordersRef
+          .where('customerId', isEqualTo: customerId)
+          .orderBy('createdAt', descending: true)
+          .limit(customerOrderLimit)
+          .get();
+    } on FirebaseException catch (e) {
+      if (e.code != 'failed-precondition') rethrow;
+      snapshot =
+          await _ordersRef.where('customerId', isEqualTo: customerId).get();
+    }
 
     final orders = snapshot.docs
         .map((doc) => Order.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
 
-    // In-memory sort by createdAt descending (Firestore requires compound indexes for combining where + orderby in complex rules, so sorting in memory is safer and extremely fast for customer lists)
     orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return orders;
   }
