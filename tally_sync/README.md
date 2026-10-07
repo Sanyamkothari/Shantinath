@@ -101,7 +101,13 @@ python tally_sync.py --days 365
 
 ## ⏰ Automating with Windows Task Scheduler
 
-To avoid running the script manually, configure Windows to execute it automatically (e.g., every hour):
+To avoid running the script manually, configure Windows to execute it automatically (every 4 hours is a good default):
+
+> **Mind the Firestore free-plan quota (50,000 reads/day).** Each run reads every
+> already-synced document once to compare it with Tally (it only *writes* what
+> changed). Running hourly multiplies that by 24, so on the Spark plan prefer
+> every 4–6 hours. Run `python tally_sync.py --dry-run` to see how many documents
+> a run touches.
 
 1. Press the Windows Key, type **Task Scheduler**, and press Enter.
 2. Click **Create Basic Task** in the Actions panel on the right.
@@ -114,4 +120,4 @@ To avoid running the script manually, configure Windows to execute it automatica
 8. **Start in**: Enter the absolute path to the directory containing your script:
    *Example:* `C:\Users\sanya\shantinath_agro\tally_sync`
 9. Click **Finish**.
-10. To make it repeat every hour: Double-click the task in the list, go to the **Triggers** tab, click **Edit**, check the box **"Repeat task every:"** and select **1 hour**.
+10. To make it repeat: Double-click the task in the list, go to the **Triggers** tab, click **Edit**, check the box **"Repeat task every:"** and select **4 hours** (see the quota note above).

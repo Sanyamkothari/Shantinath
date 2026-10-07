@@ -253,6 +253,14 @@ service cloud.firestore {
         (isAdmin() || hasPerm('createDeliveryMemo'));
     }
 
+    // Catalog version stamp: every product write bumps it, and every device
+    // reads just this one doc to decide whether its cached catalog is still
+    // current (instead of re-reading all products). Public like the catalog.
+    match /app_metadata/catalog_version {
+      allow read: if true;
+      allow write: if isAdmin() || hasPerm('manageProducts');
+    }
+
     // Application Metadata (e.g. Tally sync status)
     match /app_metadata/{docId} {
       allow read: if isAuthenticated();
