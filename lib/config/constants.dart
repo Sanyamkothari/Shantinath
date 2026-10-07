@@ -114,7 +114,7 @@ class AppConstants {
   // Override per build with --dart-define=OTP_API_BASE_URL=...
   static const String otpApiBaseUrl = String.fromEnvironment(
     'OTP_API_BASE_URL',
-    defaultValue: 'https://shantinath-otp.REPLACE_ME.workers.dev',
+    defaultValue: 'https://shantinath-otp.shantinath-otp-worker.workers.dev',
   );
 
   // ── Seller details (printed on tax invoices and delivery memos) ────────

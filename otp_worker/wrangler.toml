@@ -10,7 +10,7 @@ crons = ["0 3 * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "shantinath-otp"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "2a6c0123-8726-4bcc-930f-bbbf35651c83"
 
 # Secrets (never put these in this file):
 #   wrangler secret put MC_AUTH_TOKEN     # MessageCentral VerifyNow auth token
