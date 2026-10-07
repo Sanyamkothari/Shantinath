@@ -163,19 +163,6 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // OTP verification sessions (verificationId -> phone binding) and the OTP
-    // send rate-limit counters. Written only by the sendOtp/verifyOtp Cloud
-    // Functions via the Admin SDK, which bypasses these rules. Readable by a
-    // client they must never be: the session doc is what stops one user from
-    // redeeming another user's verificationId.
-    match /otp_sessions/{sessionId} {
-      allow read, write: if false;
-    }
-
-    match /otp_rate_limits/{bucketId} {
-      allow read, write: if false;
-    }
-
     // Products Collection
     match /products/{productId} {
       // Catalog is public (including unauthenticated visitors).
@@ -197,7 +184,12 @@ service cloud.firestore {
     // Activity Logs Collection (audit logs)
     match /activity_logs/{logId} {
       allow read: if isAuthenticated() && (isAdmin() || hasPerm('viewAuditLogs'));
-      allow create: if isAuthenticated() && (request.resource.data.actorId == phone10() || request.resource.data.actorId == 'system');
+      // Written by the app itself (there are no Cloud Functions on the Spark
+      // plan): a signed-in user can only log as themselves, and the timestamp
+      // must be the server's so history can't be back-dated.
+      allow create: if isAuthenticated() &&
+        (request.resource.data.actorId == phone10() || request.resource.data.actorId == 'system') &&
+        request.resource.data.createdAt == request.time;
       allow update, delete: if false; // Append-only
     }
 

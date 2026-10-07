@@ -109,7 +109,13 @@ class AppConstants {
   static const String businessContactPhone = '9422167400';
 
   static const String adminName = 'Admin';
-  static const String cloudFunctionsRegion = 'us-central1'; // Change if deploying to another region (e.g. asia-south1)
+  // Base URL of the OTP Worker (see otp_worker/README.md), printed by
+  // `wrangler deploy`, e.g. https://shantinath-otp.<account>.workers.dev.
+  // Override per build with --dart-define=OTP_API_BASE_URL=...
+  static const String otpApiBaseUrl = String.fromEnvironment(
+    'OTP_API_BASE_URL',
+    defaultValue: 'https://shantinath-otp.REPLACE_ME.workers.dev',
+  );
 
   // ── Seller details (printed on tax invoices and delivery memos) ────────
   // Transcribed from the firm's Tally TAX INVOICE. These are regulatory

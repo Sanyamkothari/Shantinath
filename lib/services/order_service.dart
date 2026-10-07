@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:shantinath_agro/models/cart_item.dart';
 import 'package:shantinath_agro/models/order.dart';
+import 'package:shantinath_agro/services/activity_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Service for managing orders with Cloud Firestore.
@@ -43,7 +44,11 @@ class OrderService {
         return true;
       });
 
-      if (created) return newOrder;
+      if (created) {
+        // Audit trail (formerly the onOrderCreated Cloud Function trigger).
+        await ActivityService.logOrderPlaced(newOrder);
+        return newOrder;
+      }
     }
     throw Exception(
         'Could not allocate a unique order number. Please try again.');
@@ -85,6 +90,8 @@ class OrderService {
     String lastModifiedById = '',
     String lastModifiedByName = '',
   }) async {
+    final before = await getOrderById(orderId);
+
     await _ordersRef.doc(orderId).update({
       'status': status.name,
       'lastModifiedById': lastModifiedById,
@@ -96,7 +103,16 @@ class OrderService {
       throw Exception('Order with id $orderId not found');
     }
 
-    return Order.fromJson(updatedDoc.data() as Map<String, dynamic>);
+    final after = Order.fromJson(updatedDoc.data() as Map<String, dynamic>);
+    if (before != null) {
+      await ActivityService.logOrderModified(
+        before: before,
+        after: after,
+        modifiedById: lastModifiedById,
+        modifiedByName: lastModifiedByName,
+      );
+    }
+    return after;
   }
 
   /// Update both the items list and the status of an order identified by [orderId] in Firestore.
@@ -108,6 +124,8 @@ class OrderService {
     String lastModifiedById = '',
     String lastModifiedByName = '',
   }) async {
+    final before = await getOrderById(orderId);
+
     await _ordersRef.doc(orderId).update({
       'items': items.map((item) => item.toJson()).toList(),
       'status': status.name,
@@ -120,7 +138,16 @@ class OrderService {
       throw Exception('Order with id $orderId not found');
     }
 
-    return Order.fromJson(updatedDoc.data() as Map<String, dynamic>);
+    final after = Order.fromJson(updatedDoc.data() as Map<String, dynamic>);
+    if (before != null) {
+      await ActivityService.logOrderModified(
+        before: before,
+        after: after,
+        modifiedById: lastModifiedById,
+        modifiedByName: lastModifiedByName,
+      );
+    }
+    return after;
   }
 
   /// Get a single order by [id] from Firestore. Returns null if not found.
