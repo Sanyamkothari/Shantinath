@@ -30,6 +30,18 @@ class _EmployeeTrackingScreenState extends State<EmployeeTrackingScreen> {
     'employee_removed'
   ];
 
+  late final Stream<QuerySnapshot> _logsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _logsStream = FirebaseFirestore.instance
+        .collection('activity_logs')
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots();
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -141,10 +153,7 @@ class _EmployeeTrackingScreenState extends State<EmployeeTrackingScreen> {
         elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('activity_logs')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
+        stream: _logsStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());

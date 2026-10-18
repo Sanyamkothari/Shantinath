@@ -28,6 +28,68 @@ class _StockStatusScreenState extends State<StockStatusScreen> {
       NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
   final _qtyFmt = NumberFormat.decimalPattern('en_IN');
 
+  List<_Stock>? _stockItems;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStock(forceRefresh: false);
+  }
+
+  Future<void> _loadStock({bool forceRefresh = false}) async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      QuerySnapshot snap;
+      if (!forceRefresh) {
+        // Try local offline cache first to avoid Firestore reads
+        try {
+          snap = await FirebaseFirestore.instance
+              .collection('tally_stock')
+              .orderBy('name')
+              .get(const GetOptions(source: Source.cache));
+          if (snap.docs.isEmpty) {
+            snap = await FirebaseFirestore.instance
+                .collection('tally_stock')
+                .orderBy('name')
+                .get(const GetOptions(source: Source.serverAndCache));
+          }
+        } catch (_) {
+          snap = await FirebaseFirestore.instance
+              .collection('tally_stock')
+              .orderBy('name')
+              .get(const GetOptions(source: Source.serverAndCache));
+        }
+      } else {
+        snap = await FirebaseFirestore.instance
+            .collection('tally_stock')
+            .orderBy('name')
+            .get(const GetOptions(source: Source.serverAndCache));
+      }
+
+      if (mounted) {
+        setState(() {
+          _stockItems = snap.docs
+              .map((d) => _Stock.fromDoc(d.data() as Map<String, dynamic>))
+              .toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -43,75 +105,90 @@ class _StockStatusScreenState extends State<StockStatusScreen> {
             style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
         backgroundColor: _green,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh stock',
+            onPressed: () => _loadStock(forceRefresh: true),
+          ),
+        ],
       ),
       body: Column(
         children: [
           const TallyLastUpdatedHeader(),
           _searchBar(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('tally_stock')
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return _message(Icons.error_outline_rounded,
-                      'Could not load stock', '${snapshot.error}');
-                }
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                      child: CircularProgressIndicator(color: _green));
-                }
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return _message(
-                    Icons.inventory_2_outlined,
-                    'No stock data yet',
-                    'Run the Tally sync (tally_sync.py) on the shop PC to see '
-                        'current stock levels here.',
-                  );
-                }
+            child: _buildBodyContent(),
+          ),
+        ],
+      ),
+    );
+  }
 
-                final all = docs
-                    .map((d) => _Stock.fromDoc(d.data() as Map<String, dynamic>))
-                    .toList();
+  Widget _buildBodyContent() {
+    if (_error != null) {
+      return _message(
+        Icons.error_outline_rounded,
+        'Could not load stock',
+        _error!,
+      );
+    }
 
-                // Summary over the FULL set.
-                double totalValue = 0;
-                int outOfStock = 0;
-                for (final s in all) {
-                  totalValue += s.value;
-                  if (s.quantity <= 0) outOfStock++;
-                }
+    if (_isLoading && _stockItems == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: _green),
+      );
+    }
 
-                final filtered = all.where((s) {
-                  if (_lowStockOnly && s.quantity > 0) return false;
-                  if (_query.isEmpty) return true;
-                  final q = _query.toLowerCase();
-                  return s.name.toLowerCase().contains(q) ||
-                      s.group.toLowerCase().contains(q);
-                }).toList();
+    final all = _stockItems ?? [];
+    if (all.isEmpty) {
+      return _message(
+        Icons.inventory_2_outlined,
+        'No stock data yet',
+        'Run the Tally sync (tally_sync.py) on the shop PC to see '
+            'current stock levels here.',
+      );
+    }
 
-                return Column(
-                  children: [
-                    _summary(all.length, totalValue, outOfStock),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? _message(Icons.search_off_rounded, 'No matches',
-                              'No stock item matches your search/filter.')
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
-                              itemCount: filtered.length,
-                              separatorBuilder: (_, index) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (_, i) => _row(filtered[i]),
-                            ),
-                    ),
-                  ],
-                );
-              },
-            ),
+    // Summary over the FULL set.
+    double totalValue = 0;
+    int outOfStock = 0;
+    for (final s in all) {
+      totalValue += s.value;
+      if (s.quantity <= 0) outOfStock++;
+    }
+
+    final filtered = all.where((s) {
+      if (_lowStockOnly && s.quantity > 0) return false;
+      if (_query.isEmpty) return true;
+      final q = _query.toLowerCase();
+      return s.name.toLowerCase().contains(q) ||
+          s.group.toLowerCase().contains(q);
+    }).toList();
+
+    return RefreshIndicator(
+      color: _green,
+      onRefresh: () => _loadStock(forceRefresh: true),
+      child: Column(
+        children: [
+          _summary(all.length, totalValue, outOfStock),
+          Expanded(
+            child: filtered.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      _message(Icons.search_off_rounded, 'No matches',
+                          'No stock item matches your search/filter.'),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _row(filtered[i]),
+                  ),
           ),
         ],
       ),

@@ -20,7 +20,12 @@ if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 val releaseStorePath: String? = keystoreProperties.getProperty("storeFile")
-val hasReleaseSigning = releaseStorePath != null && file(releaseStorePath).exists()
+val resolvedStoreFile = if (releaseStorePath != null) {
+    if (file(releaseStorePath).exists()) file(releaseStorePath)
+    else if (rootProject.file(releaseStorePath).exists()) rootProject.file(releaseStorePath)
+    else null
+} else null
+val hasReleaseSigning = resolvedStoreFile != null
 
 android {
     namespace = "com.shantinathagroagency.shantinath_agro"
@@ -30,7 +35,7 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = file(releaseStorePath!!)
+                storeFile = resolvedStoreFile!!
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")

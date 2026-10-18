@@ -588,13 +588,13 @@ class _CustomerUserCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           if (canViewBalances)
-                            StreamBuilder<DocumentSnapshot>(
-                              stream: FirebaseFirestore.instance
+                            FutureBuilder<DocumentSnapshot>(
+                              future: FirebaseFirestore.instance
                                   .collection('users')
                                   .doc(user.phone)
                                   .collection('private')
                                   .doc('financials')
-                                  .snapshots(),
+                                  .get(const GetOptions(source: Source.cache)),
                               builder: (context, snapshot) {
                                 double outstandingBalance = 0.0;
                                 String balanceType = 'Dr';

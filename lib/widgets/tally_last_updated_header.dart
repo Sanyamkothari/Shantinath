@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
 
 /// Reusable banner header showing when Tally data was last synced to Firestore.
@@ -10,7 +11,7 @@ import 'package:shantinath_agro/providers/locale_provider.dart';
 ///
 /// Multi-tiered fallback mechanism:
 /// 1. Reads `app_metadata/tally_sync` (global sync timestamp)
-/// 2. Reads newest `updatedAt` from `tally_ledgers` or `tally_stock` collection
+/// 2. Reads newest `updatedAt` from `tally_ledgers` or `tally_stock` collection (staff only)
 /// 3. Reads optional `fallbackTimestamp` passed from parent screen
 class TallyLastUpdatedHeader extends StatelessWidget {
   final DateTime? fallbackTimestamp;
@@ -25,6 +26,8 @@ class TallyLastUpdatedHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMarathi = context.watch<LocaleProvider>().isMarathi;
+    final authProvider = context.watch<AuthProvider>();
+    final canViewLedgers = authProvider.can('viewCustomerBalances');
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
@@ -44,11 +47,11 @@ class TallyLastUpdatedHeader extends StatelessWidget {
           }
         }
 
-        if (syncTime != null) {
+        if (syncTime != null || !canViewLedgers) {
           return _buildBanner(context, syncTime, isMarathi);
         }
 
-        // Secondary fallback: query the most recently updated document in tally_ledgers
+        // Secondary fallback for staff: query the most recently updated document in tally_ledgers
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('tally_ledgers')

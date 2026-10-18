@@ -12,6 +12,7 @@ Uses TDL Report-based XML format for maximum compatibility across Tally versions
 import argparse
 import hashlib
 import json
+import os
 import sys
 import re
 from collections import defaultdict
@@ -1219,34 +1220,85 @@ def _doc_hash(data):
         json.dumps(payload, sort_keys=True, default=str).encode('utf-8')).hexdigest()
 
 
-def _apply_incremental(db, coll_ref, desired, dry_run, allow_deletes=True, keep=None):
-    """Writes only new/changed docs and deletes docs no longer present.
-    `desired` = {doc_id: data} (SERVER_TIMESTAMP allowed; must NOT pre-set
-    syncHash). Returns (written, deleted, unchanged). In dry-run it still reads to
-    compute an accurate diff but writes nothing.
+def _load_cache(cache_path):
+    """Loads local sync cache to prevent full Firestore reads on every run."""
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict) and 'collections' in data:
+                    return data
+        except Exception as e:
+            print(f"  Warning: Could not read cache '{cache_path}': {e}. Initializing fresh cache.")
+    return {'version': 1, 'collections': {}}
 
-    Deleting whatever is absent from `desired` is only correct when `desired` is
-    a COMPLETE picture of what should exist. Two knobs keep that honest:
-      allow_deletes=False  — the source fetch was partial (a window failed), so
-                             write what we have and delete nothing.
-      keep(doc_id, data)   — return True to protect a doc from deletion even
-                             though it's absent; used to scope deletes to the
-                             date window actually synced, so a short --days run
-                             cannot wipe older history."""
-    existing = {}
-    for d in coll_ref.stream():
-        existing[d.id] = d.to_dict() or {}
+
+def _save_cache(cache_path, cache_data):
+    """Atomically persists sync cache to disk."""
+    try:
+        cache_data['updatedAt'] = datetime.now(timezone.utc).isoformat()
+        tmp_path = f"{cache_path}.tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(cache_data, f, indent=2)
+        os.replace(tmp_path, cache_path)
+    except Exception as e:
+        print(f"  Warning: Could not save cache '{cache_path}': {e}")
+
+
+def _apply_incremental(db, coll_ref, desired, dry_run, cache=None, allow_deletes=True, keep=None, verify_remote=False):
+    """Writes only new/changed docs and deletes docs no longer present.
+    Uses local cache to avoid downloading/reading documents from Firestore.
+    `desired` = {doc_id: data} (SERVER_TIMESTAMP allowed; must NOT pre-set syncHash).
+    Returns (written, deleted, unchanged).
+    """
+    coll_path = '/'.join(getattr(coll_ref, '_path', (coll_ref.id,)))
+    colls_cache = cache.setdefault('collections', {}) if cache is not None else None
+
+    # Check if remote Firestore read is needed (e.g. cache missing this collection or verify_remote requested)
+    need_remote_read = verify_remote or colls_cache is None or coll_path not in colls_cache
+
+    if need_remote_read:
+        existing = {}
+        for d in coll_ref.stream():
+            existing[d.id] = d.to_dict() or {}
+        existing_info = {}
+        for doc_id, d in existing.items():
+            d_val = d.get('date')
+            d_iso = d_val.isoformat() if isinstance(d_val, datetime) else (str(d_val) if d_val else None)
+            existing_info[doc_id] = {
+                'h': d.get('syncHash') or _doc_hash(d),
+                'd': d_iso,
+            }
+        if colls_cache is not None:
+            colls_cache[coll_path] = existing_info
+    else:
+        existing_info = colls_cache.get(coll_path, {})
 
     writes = {}
     for doc_id, data in desired.items():
         h = _doc_hash(data)
-        if existing.get(doc_id, {}).get('syncHash') != h:
+        cached_val = existing_info.get(doc_id)
+        cached_hash = cached_val.get('h') if isinstance(cached_val, dict) else cached_val
+        if cached_hash != h:
             writes[doc_id] = {**data, 'syncHash': h}
+
     if allow_deletes:
-        deletes = [i for i, d in existing.items()
-                   if i not in desired and not (keep and keep(i, d))]
+        deletes = []
+        for i, cached_val in existing_info.items():
+            if i not in desired:
+                doc_date = None
+                if isinstance(cached_val, dict):
+                    d_str = cached_val.get('d')
+                    if d_str:
+                        try:
+                            doc_date = datetime.fromisoformat(d_str)
+                        except Exception:
+                            doc_date = None
+                if not (keep and keep(i, {'date': doc_date})):
+                    deletes.append(i)
     else:
         deletes = []
+
     written, deleted, unchanged = len(writes), len(deletes), len(desired) - len(writes)
 
     if dry_run:
@@ -1256,20 +1308,32 @@ def _apply_incremental(db, coll_ref, desired, dry_run, allow_deletes=True, keep=
     n = 0
     for doc_id in deletes:
         batch.delete(coll_ref.document(doc_id))
+        if colls_cache is not None and coll_path in colls_cache:
+            colls_cache[coll_path].pop(doc_id, None)
         n += 1
         if n >= 400:
             batch.commit()
             batch = db.batch()
             n = 0
+
     for doc_id, data in writes.items():
         batch.set(coll_ref.document(doc_id), data, merge=True)
+        if colls_cache is not None:
+            d_val = data.get('date')
+            d_iso = d_val.isoformat() if isinstance(d_val, datetime) else (str(d_val) if d_val else None)
+            colls_cache.setdefault(coll_path, {})[doc_id] = {
+                'h': data['syncHash'],
+                'd': d_iso,
+            }
         n += 1
         if n >= 400:
             batch.commit()
             batch = db.batch()
             n = 0
+
     if n > 0:
         batch.commit()
+
     return written, deleted, unchanged
 
 
@@ -1307,7 +1371,8 @@ def _outside_window(from_date, to_date, pad_days=2):
 
 def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_path,
                       dry_run=False, stock_items=None, invoices=None,
-                      statements_complete=True, statement_window=None):
+                      statements_complete=True, statement_window=None,
+                      cache_file='tally_sync_cache.json', verify_remote=False):
     """Matches Tally ledgers with Firestore users and updates databases."""
     print("\nConnecting to Cloud Firestore...")
     try:
@@ -1319,6 +1384,14 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
         print(f"Error initializing Firebase Admin SDK: {e}")
         print("Please check if your Service Account JSON key is correct and accessible.")
         sys.exit(1)
+
+    # Load local sync cache to prevent full Firestore reads
+    cache = _load_cache(cache_file)
+    cached_colls_count = len(cache.get('collections', {}))
+    if cached_colls_count > 0 and not verify_remote:
+        print(f"  ✔ Loaded local sync journal cache ({cached_colls_count} collections indexed). Zero reads for unchanged data.")
+    elif verify_remote:
+        print("  ⚠️ Remote verification enabled (--verify-remote): will cross-check against Firestore.")
 
     # ----- Step 0: Sync stock items to 'tally_stock' (read-only admin status view) -----
     # This is a standalone snapshot of Tally inventory for the admin Stock Status
@@ -1339,7 +1412,8 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
                 'value': item.get('value', 0.0),
                 'updatedAt': firestore.SERVER_TIMESTAMP,
             }
-        w, d, u = _apply_incremental(db, db.collection('tally_stock'), desired, dry_run)
+        w, d, u = _apply_incremental(db, db.collection('tally_stock'), desired, dry_run,
+                                     cache=cache, verify_remote=verify_remote)
         _incr_label(dry_run, 'tally_stock', w, d, u)
     else:
         print("  (No stock items from Tally — skipping, not clearing existing.)")
@@ -1359,7 +1433,8 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
             'updatedAt': firestore.SERVER_TIMESTAMP,
         }
     if desired:
-        w, d, u = _apply_incremental(db, db.collection('tally_parties'), desired, dry_run)
+        w, d, u = _apply_incremental(db, db.collection('tally_parties'), desired, dry_run,
+                                     cache=cache, verify_remote=verify_remote)
         _incr_label(dry_run, 'tally_parties', w, d, u)
     else:
         print("  (No shop ledgers — skipping, not clearing existing.)")
@@ -1402,7 +1477,8 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
     if desired:
         # The diff also deletes any doc not in the SHOP LIST set — this is what
         # purges stale non-shop ledgers from earlier full-Sundry-Debtors syncs.
-        w, d, u = _apply_incremental(db, db.collection('tally_ledgers'), desired, dry_run)
+        w, d, u = _apply_incremental(db, db.collection('tally_ledgers'), desired, dry_run,
+                                     cache=cache, verify_remote=verify_remote)
         _incr_label(dry_run, 'tally_ledgers', w, d, u,
                     extra=' (deletes include stale non-shop docs)')
     else:
@@ -1454,8 +1530,10 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
                 'createdAt': firestore.SERVER_TIMESTAMP,
             }
         w, d, u = _apply_incremental(db, txns_ref, desired, dry_run,
+                                     cache=cache,
                                      allow_deletes=statements_complete,
-                                     keep=window_keep)
+                                     keep=window_keep,
+                                     verify_remote=verify_remote)
         tw += w
         td += d
         tu += u
@@ -1497,8 +1575,10 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
                 'createdAt': firestore.SERVER_TIMESTAMP,
             }
         w, d, u = _apply_incremental(db, inv_ref, desired, dry_run,
+                                     cache=cache,
                                      allow_deletes=statements_complete,
-                                     keep=window_keep)
+                                     keep=window_keep,
+                                     verify_remote=verify_remote)
         iw += w
         idl += d
         iu += u
@@ -1592,74 +1672,55 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
             # Sync transactions for this ledger if available
             ledger_vouchers = vouchers.get(t_name, [])
             if ledger_vouchers:
-                if dry_run:
-                    print(f"    [Dry Run] Would sync {len(ledger_vouchers)} transaction entries.")
-                else:
-                    txns_ref = db.collection('users').document(matched_user_id).collection('ledger_transactions')
+                txns_ref = db.collection('users').document(matched_user_id).collection('ledger_transactions')
+                coll_path = '/'.join(getattr(txns_ref, '_path', (txns_ref.id,)))
+                user_cached = cache.get('collections', {}).get(coll_path, {}) if cache is not None else {}
 
-                    # Fetch existing transactions to detect new vouchers
-                    existing_txns = list(txns_ref.stream())
-                    existing_vch_nos = set()
-                    for t_doc in existing_txns:
-                        t_data = t_doc.to_dict()
-                        v_no = t_data.get('voucherNo')
-                        if v_no:
-                            existing_vch_nos.add(str(v_no))
+                desired = {}
+                new_receipts = []
+                new_invoices = []
+                for idx, txn in enumerate(ledger_vouchers):
+                    doc_id = f"{txn['date'].strftime('%Y%m%d')}_{txn['voucherNo']}"
+                    clean_doc_id = re.sub(r'[^a-zA-Z0-9_]', '_', doc_id)
+                    final_doc_id = f"{clean_doc_id}_{idx}"
 
-                    # Identify new vouchers for notifications
-                    new_receipts = []
-                    new_invoices = []
-                    for txn in ledger_vouchers:
+                    desired[final_doc_id] = {
+                        'date': txn['date'],
+                        'voucherType': txn['voucherType'],
+                        'voucherNo': txn['voucherNo'],
+                        'amount': txn['amount'],
+                        'type': txn['type'],
+                        'particulars': txn['particulars'],
+                        'narration': txn['narration'],
+                        'createdAt': firestore.SERVER_TIMESTAMP
+                    }
+
+                    # Detect truly new vouchers for notifications (absent from cache)
+                    if final_doc_id not in user_cached:
                         vch_no = str(txn['voucherNo'])
-                        if vch_no not in existing_vch_nos:
-                            vch_type = txn['voucherType'].lower()
-                            vch_amount = txn['amount']
-                            if 'receipt' in vch_type:
-                                new_receipts.append((vch_no, vch_amount))
-                            elif 'sales' in vch_type or 'invoice' in vch_type:
-                                new_invoices.append((vch_no, vch_amount))
+                        vch_type = txn['voucherType'].lower()
+                        vch_amount = txn['amount']
+                        if 'receipt' in vch_type:
+                            new_receipts.append((vch_no, vch_amount))
+                        elif 'sales' in vch_type or 'invoice' in vch_type:
+                            new_invoices.append((vch_no, vch_amount))
 
-                    # Delete existing transactions
-                    for t_doc in existing_txns:
-                        t_doc.reference.delete()
+                w, d, u = _apply_incremental(
+                    db, txns_ref, desired, dry_run, cache=cache,
+                    allow_deletes=statements_complete, keep=window_keep,
+                    verify_remote=verify_remote
+                )
+                _incr_label(dry_run, f"customer '{t_name}' txns", w, d, u)
 
-                    # Write new transactions
-                    batch = db.batch()
-                    for idx, txn in enumerate(ledger_vouchers):
-                        doc_id = f"{txn['date'].strftime('%Y%m%d')}_{txn['voucherNo']}"
-                        clean_doc_id = re.sub(r'[^a-zA-Z0-9_]', '_', doc_id)
-
-                        doc_ref = txns_ref.document(f"{clean_doc_id}_{idx}")
-
-                        batch.set(doc_ref, {
-                            'date': txn['date'],
-                            'voucherType': txn['voucherType'],
-                            'voucherNo': txn['voucherNo'],
-                            'amount': txn['amount'],
-                            'type': txn['type'],
-                            'particulars': txn['particulars'],
-                            'narration': txn['narration'],
-                            'createdAt': firestore.SERVER_TIMESTAMP
-                        })
-
-                        # Firestore batch limit is 500
-                        if (idx + 1) % 490 == 0:
-                            batch.commit()
-                            batch = db.batch()
-
-                    batch.commit()
-                    print(f"    Synced {len(ledger_vouchers)} transaction entries.")
-
-                    # Send push notifications for new receipts or invoices
-                    if fcm_token:
-                        for vch_no, amount in new_receipts:
-                            title = "Payment Confirmed 🤝"
-                            body = f"Payment of ₹{amount:,.2f} received against Receipt #{vch_no}. Thank you!"
-                            send_push_notification(fcm_token, title, body)
-                        for vch_no, amount in new_invoices:
-                            title = "New Invoice Raised 📄"
-                            body = f"New sales invoice #{vch_no} raised for ₹{amount:,.2f}."
-                            send_push_notification(fcm_token, title, body)
+                if not dry_run and fcm_token:
+                    for vch_no, amount in new_receipts:
+                        title = "Payment Confirmed 🤝"
+                        body = f"Payment of ₹{amount:,.2f} received against Receipt #{vch_no}. Thank you!"
+                        send_push_notification(fcm_token, title, body)
+                    for vch_no, amount in new_invoices:
+                        title = "New Invoice Raised 📄"
+                        body = f"New sales invoice #{vch_no} raised for ₹{amount:,.2f}."
+                        send_push_notification(fcm_token, title, body)
 
     if not dry_run:
         try:
@@ -1671,6 +1732,10 @@ def sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, service_account_pa
             }, merge=True)
         except Exception as e:
             print(f"  Warning: Could not update app_metadata sync timestamp: {e}")
+
+        # Persist local sync journal cache
+        _save_cache(cache_file, cache)
+        print(f"  ✔ Saved sync journal cache to '{cache_file}'. (Zero Firestore reads on future syncs)")
 
     print(f"\n{'='*50}")
     print(f"Sync complete. Matched and updated {matched_count} of {len(debtor_ledgers)} debtor ledgers.")
@@ -1756,6 +1821,10 @@ def main():
     parser.add_argument("--company", default="SHANTINATH AGRO AGENCIES ARNI 2024-2027",
                         help="Exact name of the company in Tally. If it doesn't match, "
                              "the sync auto-uses the single open company.")
+    parser.add_argument("--cache-file", default="tally_sync_cache.json",
+                        help="Path to local cache JSON file tracking written document hashes (default: tally_sync_cache.json)")
+    parser.add_argument("--verify-remote", action="store_true",
+                        help="Force reading Firestore collections to verify/rebuild local cache")
 
     args = parser.parse_args()
 
@@ -1818,7 +1887,9 @@ def main():
     sync_to_firestore(debtor_ledgers, shop_ledgers, vouchers, args.service_account,
                       dry_run=args.dry_run, stock_items=stock_items, invoices=invoices,
                       statements_complete=statements_complete,
-                      statement_window=statement_window)
+                      statement_window=statement_window,
+                      cache_file=args.cache_file,
+                      verify_remote=args.verify_remote)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,70 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
     decimalDigits: 0,
   );
 
+  List<_Ledger>? _ledgers;
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBalances(forceRefresh: false);
+  }
+
+  Future<void> _loadBalances({bool forceRefresh = false}) async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      QuerySnapshot snap;
+      if (!forceRefresh) {
+        // Try local offline cache first to avoid server document reads
+        try {
+          snap = await FirebaseFirestore.instance
+              .collection('tally_ledgers')
+              .orderBy('name')
+              .get(const GetOptions(source: Source.cache));
+          if (snap.docs.isEmpty) {
+            snap = await FirebaseFirestore.instance
+                .collection('tally_ledgers')
+                .orderBy('name')
+                .get(const GetOptions(source: Source.serverAndCache));
+          }
+        } catch (_) {
+          snap = await FirebaseFirestore.instance
+              .collection('tally_ledgers')
+              .orderBy('name')
+              .get(const GetOptions(source: Source.serverAndCache));
+        }
+      } else {
+        // Explicit user refresh
+        snap = await FirebaseFirestore.instance
+            .collection('tally_ledgers')
+            .orderBy('name')
+            .get(const GetOptions(source: Source.serverAndCache));
+      }
+
+      if (mounted) {
+        setState(() {
+          _ledgers = snap.docs
+              .map((d) => _Ledger.fromDoc(
+                  d.data() as Map<String, dynamic>, d.id))
+              .toList();
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -49,89 +113,97 @@ class _AllBalancesScreenState extends State<AllBalancesScreen> {
         backgroundColor: _green,
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh balances',
+            onPressed: () => _loadBalances(forceRefresh: true),
+          ),
+        ],
       ),
       body: Column(
         children: [
           const TallyLastUpdatedHeader(),
           _buildSearchBar(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('tally_ledgers')
-                  .orderBy('name')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return _buildMessage(
-                    Icons.error_outline_rounded,
-                    'Could not load balances',
-                    '${snapshot.error}',
-                  );
-                }
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: _green),
-                  );
-                }
+            child: _buildBodyContent(),
+          ),
+        ],
+      ),
+    );
+  }
 
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return _buildMessage(
-                    Icons.account_balance_wallet_outlined,
-                    'No balance data yet',
-                    'Run the Tally sync agent (tally_sync.py) on the shop PC to '
-                        'populate customer credit/debit balances here.',
-                  );
-                }
+  Widget _buildBodyContent() {
+    if (_error != null) {
+      return _buildMessage(
+        Icons.error_outline_rounded,
+        'Could not load balances',
+        _error!,
+      );
+    }
 
-                // Map + filter.
-                final all = docs
-                    .map((d) => _Ledger.fromDoc(
-                        d.data() as Map<String, dynamic>, d.id))
-                    .toList();
+    if (_isLoading && _ledgers == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: _green),
+      );
+    }
 
-                final filtered = _query.isEmpty
-                    ? all
-                    : all.where((l) {
-                        final q = _query.toLowerCase();
-                        return l.name.toLowerCase().contains(q) ||
-                            l.village.toLowerCase().contains(q) ||
-                            l.phone.contains(q);
-                      }).toList();
+    final all = _ledgers ?? [];
+    if (all.isEmpty) {
+      return _buildMessage(
+        Icons.account_balance_wallet_outlined,
+        'No balance data yet',
+        'Run the Tally sync agent (tally_sync.py) on the shop PC to '
+            'populate customer credit/debit balances here.',
+      );
+    }
 
-                // Totals across the FULL set (not just the filtered view).
-                double totalDr = 0, totalCr = 0;
-                for (final l in all) {
-                  if (l.balance == 0) continue;
-                  if (l.balanceType == 'Cr') {
-                    totalCr += l.balance;
-                  } else {
-                    totalDr += l.balance;
-                  }
-                }
+    final filtered = _query.isEmpty
+        ? all
+        : all.where((l) {
+            final q = _query.toLowerCase();
+            return l.name.toLowerCase().contains(q) ||
+                l.village.toLowerCase().contains(q) ||
+                l.phone.contains(q);
+          }).toList();
 
-                return Column(
-                  children: [
-                    _buildSummary(totalDr, totalCr, all.length),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? _buildMessage(
-                              Icons.search_off_rounded,
-                              'No matches',
-                              'No customer matches "$_query".',
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
-                              itemCount: filtered.length,
-                              separatorBuilder: (_, index) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (_, i) => _buildRow(filtered[i]),
-                            ),
-                    ),
-                  ],
-                );
-              },
-            ),
+    // Totals across the FULL set (not just the filtered view).
+    double totalDr = 0, totalCr = 0;
+    for (final l in all) {
+      if (l.balance == 0) continue;
+      if (l.balanceType == 'Cr') {
+        totalCr += l.balance;
+      } else {
+        totalDr += l.balance;
+      }
+    }
+
+    return RefreshIndicator(
+      color: _green,
+      onRefresh: () => _loadBalances(forceRefresh: true),
+      child: Column(
+        children: [
+          _buildSummary(totalDr, totalCr, all.length),
+          Expanded(
+            child: filtered.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      _buildMessage(
+                        Icons.search_off_rounded,
+                        'No matches',
+                        'No customer matches "$_query".',
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _buildRow(filtered[i]),
+                  ),
           ),
         ],
       ),

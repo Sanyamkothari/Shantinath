@@ -100,19 +100,19 @@ class Order {
 
   /// Total number of individual items (sum of all quantities).
   int get totalItemCount =>
-      items.fold(0, (sum, item) => sum + item.quantity);
+      items.fold(0, (total, item) => total + item.quantity);
 
   /// Total amount for items that have been delivered.
   double get deliveredAmount =>
-      items.fold(0.0, (sum, item) => sum + (item.product.price * item.deliveredQuantity));
+      items.fold(0.0, (total, item) => total + (item.product.price * item.deliveredQuantity));
 
   /// Total amount for items that have been confirmed.
   double get confirmedAmount =>
-      items.fold(0.0, (sum, item) => sum + (item.product.price * item.confirmedQuantity));
+      items.fold(0.0, (total, item) => total + (item.product.price * item.confirmedQuantity));
 
   /// Total amount for items that are still pending.
   double get pendingAmount =>
-      items.fold(0.0, (sum, item) => sum + (item.product.price * item.pendingQuantity));
+      items.fold(0.0, (total, item) => total + (item.product.price * item.pendingQuantity));
 
   /// Whether the order contains any pending items/quantities.
   bool get hasPendingItems => items.any((item) => item.pendingQuantity > 0);

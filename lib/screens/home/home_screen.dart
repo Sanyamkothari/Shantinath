@@ -87,6 +87,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBottomNav(int currentIndex, TabNavigationProvider navProvider) {
+    final isMarathi = context.watch<LocaleProvider>().isMarathi;
+
     return Container(
       decoration: BoxDecoration(
         boxShadow: [
@@ -117,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Icons.home_rounded,
               color: Color(0xFF2E7D32),
             ),
-            label: 'Home',
+            label: isMarathi ? 'मुख्य' : 'Home',
           ),
           NavigationDestination(
             icon: const Icon(Icons.storefront_outlined),
@@ -125,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Icons.storefront_rounded,
               color: Color(0xFF2E7D32),
             ),
-            label: 'Shop',
+            label: isMarathi ? 'दुकान' : 'Shop',
           ),
           NavigationDestination(
             icon: Consumer<CartProvider>(
@@ -151,20 +153,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               },
             ),
-            label: 'Cart',
+            label: isMarathi ? 'कार्ट' : 'Cart',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(
+          NavigationDestination(
+            icon: const Icon(Icons.receipt_long_outlined),
+            selectedIcon: const Icon(
               Icons.receipt_long_rounded,
               color: Color(0xFF2E7D32),
             ),
-            label: 'Orders',
+            label: isMarathi ? 'ऑर्डर्स' : 'Orders',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded, color: Color(0xFF2E7D32)),
-            label: 'Profile',
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline_rounded),
+            selectedIcon: const Icon(Icons.person_rounded, color: Color(0xFF2E7D32)),
+            label: isMarathi ? 'प्रोफाइल' : 'Profile',
           ),
         ],
       ),

@@ -1,7 +1,7 @@
 name: shantinath_agro
 description: "Shantinath Agro Agency - Seed & Fertilizer Order Management App"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.12.1
@@ -44,8 +44,8 @@ dependencies:
   http: ^1.2.0 # calls the OTP Worker (otp_worker/)
 
   # Delivery memo PDF generation + printing/sharing
-  pdf: ^3.11.1
-  printing: ^5.13.4
+  pdf: ^3.12.0
+  printing: ^5.14.3
 
 
 dev_dependencies:
@@ -65,7 +65,7 @@ flutter:
 
 flutter_launcher_icons:
   android: true
-  ios: false
+  ios: true
   image_path: "assets/images/logo.png"
   min_sdk_android: 21 # android min sdk warning prevention
   adaptive_icon_background: "#FFFFFF"
