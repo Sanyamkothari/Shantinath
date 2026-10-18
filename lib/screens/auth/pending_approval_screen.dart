@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shantinath_agro/config/constants.dart';
 import 'package:shantinath_agro/config/routes.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
 import 'package:shantinath_agro/providers/locale_provider.dart';
@@ -106,6 +108,45 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen>
           ),
         );
       }
+    }
+  }
+
+  Future<void> _callOffice() async {
+    final cleanPhone = AppConstants.businessContactPhone
+        .replaceAll('+', '')
+        .replaceAll(' ', '')
+        .trim();
+    final uri = Uri.parse('tel:$cleanPhone');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open phone dialer')),
+      );
+    }
+  }
+
+  Future<void> _messageWhatsApp(String firmOrName) async {
+    final cleanPhone = AppConstants.businessContactPhone
+        .replaceAll('+', '')
+        .replaceAll(' ', '')
+        .trim();
+    final formattedPhone =
+        cleanPhone.startsWith('91') ? cleanPhone : '91$cleanPhone';
+    final isMarathi = context.read<LocaleProvider>().isMarathi;
+    final message = isMarathi
+        ? 'नमस्कार शांतीनाथ ॲग्रो एजन्सी, मी माझ्या फर्मसाठी ($firmOrName) ॲपवर नोंदणी केली आहे. कृपया माझे खाते मंजूर करावे.'
+        : 'Hello Shantinath Agro Agency, I have registered my firm ($firmOrName) on the app. Please approve my account.';
+    final encoded = Uri.encodeComponent(message);
+    final uri = Uri.parse('https://wa.me/$formattedPhone?text=$encoded');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open WhatsApp')),
+      );
     }
   }
 
@@ -216,6 +257,93 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen>
                     ],
                   ),
                 ),
+
+              const SizedBox(height: 16),
+
+              // Direct contact / help buttons
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.02),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                  border: Border.all(color: Colors.grey.shade100, width: 1.5),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isMarathi ? 'तात्काळ मंजुरीसाठी संपर्क साधा:' : 'For quick verification & approval:',
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _callOffice,
+                            icon: const Icon(Icons.call_rounded, size: 18, color: Color(0xFF2E7D32)),
+                            label: Text(
+                              isMarathi ? 'कॉल करा' : 'Call Office',
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF2E7D32),
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              final firmOrName = user != null && user.firmName.isNotEmpty
+                                  ? user.firmName
+                                  : (user?.name ?? '');
+                              _messageWhatsApp(firmOrName);
+                            },
+                            icon: const Icon(Icons.chat_bubble_rounded, size: 18, color: Colors.white),
+                            label: Text(
+                              isMarathi ? 'व्हॉट्सॲप' : 'WhatsApp',
+                              style: GoogleFonts.outfit(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF25D366),
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
 
               const Spacer(),
 

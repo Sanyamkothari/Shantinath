@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shantinath_agro/providers/cart_provider.dart';
 import 'package:shantinath_agro/providers/order_provider.dart';
 import 'package:shantinath_agro/providers/auth_provider.dart';
@@ -167,6 +168,12 @@ class _CartScreenState extends State<CartScreen> {
       });
     }
 
+    final targetUser = canOrderOnBehalf && _selectedRetailer != null
+        ? _selectedRetailer
+        : authProvider.currentUser;
+    final double targetBalance = targetUser?.outstandingBalance ?? 0.0;
+    final String targetBalanceType = targetUser?.balanceType ?? 'Dr';
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -239,6 +246,15 @@ class _CartScreenState extends State<CartScreen> {
                     '₹${cartProvider.totalAmount.toStringAsFixed(0)}',
                     isBold: true,
                   ),
+                  if (targetBalance > 0 && targetBalanceType == 'Dr') ...[
+                    const SizedBox(height: 6),
+                    _buildDialogRow(
+                      isMarathi ? 'थकबाकी शिल्लक' : 'Existing Dues',
+                      '₹${targetBalance.toStringAsFixed(0)} Dr',
+                      isBold: true,
+                      color: const Color(0xFFC62828),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -335,7 +351,7 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  Widget _buildDialogRow(String label, String value, {bool isBold = false}) {
+  Widget _buildDialogRow(String label, String value, {bool isBold = false, Color? color}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -351,7 +367,7 @@ class _CartScreenState extends State<CartScreen> {
           style: TextStyle(
             fontSize: 14,
             fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-            color: const Color(0xFF1B5E20),
+            color: color ?? const Color(0xFF1B5E20),
           ),
         ),
       ],
@@ -492,6 +508,7 @@ class _CartScreenState extends State<CartScreen> {
                     ...cartProvider.items.map((item) => _buildCartItem(item)),
                     const SizedBox(height: 12),
                     _buildRetailerSelector(),
+                    _buildCreditWarning(),
                     _buildNotesField(),
                     const SizedBox(height: 100),
                   ],
@@ -993,6 +1010,111 @@ class _CartScreenState extends State<CartScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCreditWarning() {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final isMarathi = Provider.of<LocaleProvider>(context).isMarathi;
+    final user = authProvider.currentUser;
+    if (user == null) return const SizedBox.shrink();
+
+    final canOrderOnBehalf = authProvider.can('placeOrderForRetailer');
+    final targetUser = canOrderOnBehalf ? _selectedRetailer : user;
+    if (targetUser == null) return const SizedBox.shrink();
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(targetUser.phone)
+          .collection('private')
+          .doc('financials')
+          .snapshots(),
+      builder: (context, snapshot) {
+        double balance = targetUser.outstandingBalance;
+        String bType = targetUser.balanceType;
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>?;
+          if (data != null) {
+            balance = (data['outstandingBalance'] as num?)?.toDouble() ?? balance;
+            bType = data['balanceType'] as String? ?? bType;
+          }
+        }
+
+        if (balance <= 0 || bType != 'Dr') {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3E0),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFFFB74D), width: 1.2),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF9800).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Color(0xFFE65100),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isMarathi ? 'थकबाकी शिल्लक सूचना' : 'Outstanding Balance Notice',
+                      style: GoogleFonts.outfit(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: const Color(0xFFE65100),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    RichText(
+                      text: TextSpan(
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.brown.shade800,
+                          height: 1.35,
+                        ),
+                        children: [
+                          TextSpan(
+                            text: isMarathi ? 'खात्यावर ' : 'Current dues: ',
+                          ),
+                          TextSpan(
+                            text: '₹${balance.toStringAsFixed(0)} Dr',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFC62828),
+                            ),
+                          ),
+                          TextSpan(
+                            text: isMarathi
+                                ? ' बाकी आहे. ही ऑर्डर पाठवण्यापूर्वी क्रेडिट तपासणी व मंजुरीच्या अधीन राहील.'
+                                : ' outstanding. This order is subject to credit check & clearance prior to dispatch.',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
