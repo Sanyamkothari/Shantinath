@@ -125,7 +125,7 @@ class AppConstants {
   static const String sellerName = 'SHANTINATH AGRO AGENCIES ARNI 2024-2027';
   static const String sellerAddress =
       'AT POST-ARNI, MAHUR ROAD, DIST YAVATMAL [M.S.]';
-  static const String sellerPhone = '9422167401/7798167401';
+  static const String sellerPhone = '9422167400';
   static const String sellerEmail = 'shantinathagro97@gmail.com';
   static const String sellerGstNo = '27AGXPK4310L1ZY';
   static const String sellerPan = 'AGXPK4310L';
