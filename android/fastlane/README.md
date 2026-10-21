@@ -39,13 +39,29 @@ Build Flutter Release Android App Bundle (AAB)
 
 Build and upload release to Google Play Internal Testing track
 
+### android alpha
+
+```sh
+[bundle exec] fastlane android alpha
+```
+
+Build and upload release to Google Play Closed Testing (Alpha) track
+
+### android closed
+
+```sh
+[bundle exec] fastlane android closed
+```
+
+Alias for alpha track (Closed Testing)
+
 ### android beta
 
 ```sh
 [bundle exec] fastlane android beta
 ```
 
-Build and upload release to Google Play Closed Testing (Beta) track
+Build and upload release to Google Play Open Testing (Beta) track
 
 ### android production
 

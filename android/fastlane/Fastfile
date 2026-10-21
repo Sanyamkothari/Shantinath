@@ -33,12 +33,33 @@ platform :android do
       aab: aab_path,
       skip_upload_metadata: true,
       skip_upload_images: true,
-      skip_upload_screenshots: true
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
     )
     UI.success("Successfully uploaded to Google Play Internal Testing!")
   end
 
-  desc "Build and upload release to Google Play Closed Testing (Beta) track"
+  desc "Build and upload release to Google Play Closed Testing (Alpha) track"
+  lane :alpha do
+    build
+    aab_path = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
+    upload_to_play_store(
+      track: "alpha",
+      aab: aab_path,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    )
+    UI.success("Successfully uploaded to Google Play Closed Testing (Alpha)!")
+  end
+
+  desc "Alias for alpha track (Closed Testing)"
+  lane :closed do
+    alpha
+  end
+
+  desc "Build and upload release to Google Play Open Testing (Beta) track"
   lane :beta do
     build
     aab_path = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
@@ -47,9 +68,10 @@ platform :android do
       aab: aab_path,
       skip_upload_metadata: true,
       skip_upload_images: true,
-      skip_upload_screenshots: true
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
     )
-    UI.success("Successfully uploaded to Google Play Closed Testing (Beta)!")
+    UI.success("Successfully uploaded to Google Play Open Testing (Beta)!")
   end
 
   desc "Build and upload release to Google Play Production track"
@@ -63,7 +85,8 @@ platform :android do
       aab: aab_path,
       skip_upload_metadata: true,
       skip_upload_images: true,
-      skip_upload_screenshots: true
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
     }
     upload_params[:rollout] = rollout if rollout
 
@@ -79,7 +102,8 @@ platform :android do
       track_promote_to: "production",
       skip_upload_metadata: true,
       skip_upload_images: true,
-      skip_upload_screenshots: true
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
     }
     upload_params[:rollout] = rollout if rollout
 
