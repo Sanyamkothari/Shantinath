@@ -11,6 +11,11 @@
 const MC_BASE_URL = 'https://cpaas.messagecentral.com';
 const OTP_LENGTH = 6;
 
+// Demo / Reviewer credentials (for Google Play review & automated testing)
+const DEMO_PHONE = '9999999999';
+const DEMO_OTP = '123456';
+const DEMO_VERIFICATION_ID = 'demo_verification_session_9999999999';
+
 const OTP_SESSION_TTL_MS = 10 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 5;
 
@@ -193,6 +198,12 @@ async function sendOtp(request, env) {
   if (typeof phone !== 'string' || !/^\d{10}$/.test(phone)) {
     return json(400, { error: 'Valid 10-digit phone number is required' });
   }
+
+  // Reviewer / demo test number bypass (for Google Play review & testing)
+  if (phone === DEMO_PHONE) {
+    console.log(`Demo OTP requested for ${DEMO_PHONE}`);
+    return json(200, { success: true, verificationId: DEMO_VERIFICATION_ID });
+  }
   if (!env.MC_AUTH_TOKEN) {
     console.error('MC_AUTH_TOKEN secret is not configured.');
     return json(500, { error: 'Could not send OTP. Please try again.' });
@@ -290,6 +301,17 @@ async function verifyOtp(request, env) {
   }
   if (typeof otp !== 'string' || otp.trim().length !== OTP_LENGTH) {
     return json(400, { error: `Valid ${OTP_LENGTH}-digit OTP code is required` });
+  }
+
+  // Reviewer / demo test number verification bypass
+  if (phone === DEMO_PHONE) {
+    if (otp.trim() === DEMO_OTP) {
+      console.log(`Demo OTP verified successfully for ${DEMO_PHONE}`);
+      const sa = loadServiceAccount(env);
+      const customToken = await mintCustomToken(sa, DEMO_PHONE);
+      return json(200, { success: true, customToken });
+    }
+    return json(400, { error: `Invalid OTP code. For demo login, enter ${DEMO_OTP}.` });
   }
   if (!env.MC_AUTH_TOKEN) {
     console.error('MC_AUTH_TOKEN secret is not configured.');
